@@ -127,6 +127,8 @@ const TradeExecutionHub = ({ active, lastPrice }) => {
   const pnl = (margin * (priceMove / 100) * leverage).toFixed(2);
   const roi = (priceMove * leverage).toFixed(2);
   
+  const liqPrice = active.dir === 'LONG' ? active.entry * 0.98 : active.entry * 1.02;
+
   // MICRO-SCALPING: Auto-close at $0.50 gross
   if (parseFloat(pnl) >= 0.50) {
       // In a real app this would trigger the close API
