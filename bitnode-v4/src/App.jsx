@@ -345,6 +345,10 @@ function App() {
            setSystemStatus('DAILY_LIMIT_REACHED');
            return;
         }
+        if (dailyPnL <= -2) {
+           setSystemStatus('MAX_LOSS_REACHED');
+           return;
+        }
 
         if (confidence >= 80 || btcShortBias) {
           const dir = btcShortBias ? 'SHORT' : (bT > aT ? 'LONG' : 'SHORT');
@@ -354,7 +358,7 @@ function App() {
           // MICRO-PROFIT: Target $0.50 profit on $10 margin.
           // ROI = 5% / 50x = 0.1% move. (Setting 0.12% for fee buffer)
           const tpMove = entry * (0.12 / 100);
-          const slMove = entry * (0.50 / 100); 
+          const slMove = entry * (0.12 / 100); // Strict $0.50 Loss Maximum
 
           const sig = {
             id: Date.now(), time: min, coin: s.asset, dir, 
@@ -378,7 +382,7 @@ function App() {
           let lost = (active.dir === 'LONG' && nextPrice <= sl) || (active.dir === 'SHORT' && nextPrice >= sl);
           
           if (won || lost) {
-            const profit = won ? 0.55 : -2.50; // $0.55 gross to net ~$0.50
+            const profit = won ? 0.50 : -0.50; // $0.50 max win/loss
             setSignals(prev => prev.map(si => si.id === active.id ? { ...si, status: won ? 'WON' : 'LOST' } : si));
             setTotalPnL(p => p + profit);
             setDailyPnL(p => p + profit);

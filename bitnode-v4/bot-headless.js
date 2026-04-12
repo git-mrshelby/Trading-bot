@@ -41,10 +41,18 @@ async function initTop200() {
 async function scan() {
   if (dynamicPairs.length === 0) return; // Wait for init
 
-  // 1. DAILY PROFIT SHIELD
+  // 1. DAILY PROFIT & LOSS SHIELD
   if (dailyPnL >= 10) {
     console.log("========================================");
-    console.log("  DAILY LIMIT REACHED ($10). HIBERNATING ");
+    console.log("  DAILY PROFIT TARGET REACHED ($10). HIBERNATING ");
+    console.log("========================================");
+    process.exit(0); 
+  }
+  
+  // MAX LOSS CAP
+  if (dailyPnL <= -2) {
+    console.log("========================================");
+    console.log("  MAX DAILY LOSS HIT (-$2). PRESERVING $10 MARGIN. HIBERNATING ");
     console.log("========================================");
     process.exit(0); 
   }
@@ -86,7 +94,7 @@ async function scan() {
     // 83% Confidence = 92% Win Rate | 100% Confidence = 98% Win Rate
     const winProbability = confidence === 100 ? 0.98 : 0.92;
     const won = Math.random() < winProbability; 
-    const profit = won ? 0.50 : -2.50; 
+    const profit = won ? 0.50 : -0.50; // Strict $0.50 Win / $0.50 Loss target 
     
     dailyPnL += profit;
     totalPnL += profit;
