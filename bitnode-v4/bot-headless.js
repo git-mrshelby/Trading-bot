@@ -131,8 +131,10 @@ async function scan() {
     
     // Exact 50x Margin Math constraints (0.12% move for $0.50 profit/loss)
     const move = price * (0.12 / 100);
-    const tp = dir === 'LONG' ? price + move : price - move;
-    const sl = dir === 'LONG' ? price - move : price + move;
+    // Real market fix: Round to Binance's strict decimal tick-size so it resolves accurately
+    const decimals = price.toString().split('.')[1]?.length || 4;
+    const tp = parseFloat((dir === 'LONG' ? price + move : price - move).toFixed(decimals));
+    const sl = parseFloat((dir === 'LONG' ? price - move : price + move).toFixed(decimals));
 
     console.log(`\n> [GODZILLA LEAD] ${asset} at $${price.toFixed(4)} | CONFIDENCE: ${confidence}% | DIR: ${dir}`);
     console.log(`  |- Real TP: $${tp.toFixed(4)} | Real SL: $${sl.toFixed(4)}`);
