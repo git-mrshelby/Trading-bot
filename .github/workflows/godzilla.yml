@@ -21,7 +21,7 @@ jobs:
       - name: Install Dependencies
         run: |
           if [ -d "bitnode-v4" ]; then cd bitnode-v4; fi
-          npm install axios
+          npm install axios pdfkit
 
       - name: Run Godzilla Headless Engine
         run: |
@@ -32,8 +32,10 @@ jobs:
       - name: Upload Daily Profit Report
         uses: actions/upload-artifact@v4
         with:
-          name: godzilla-hourly-report
+          name: godzilla-daily-report
           path: |
             daily_report.json
+            daily_report.pdf
             bitnode-v4/daily_report.json
+            bitnode-v4/daily_report.pdf
           if-no-files-found: ignore

@@ -1,19 +1,65 @@
 import axios from 'axios';
 import fs from 'fs';
+import PDFDocument from 'pdfkit';
 
 let dailyPnL = 0;
 let totalPnL = 0;
 let trades = [];
 
-// Dynamic Top 200 Memory
 let dynamicPairs = [];
 let livePrices = {};
 let activeTrade = null;
 
-// --- RANDOM WALK THEORY MATHEMATICS ---
 function randomWalk(price, drift, vol) {
   const shock = (Math.random() + Math.random() + Math.random() + Math.random() - 2) * 1.5;
   return price * Math.exp((drift - 0.5 * Math.pow(vol, 2)) + vol * shock);
+}
+
+function generateReports() {
+    // 1. JSON Data Audit
+    const report = { timestamp: new Date().toISOString(), dailyPnL, totalPnL, tradeCount: trades.length, trades };
+    fs.writeFileSync('daily_report.json', JSON.stringify(report, null, 2));
+
+    // 2. Beautiful PDF Audit for GitHub
+    try {
+        const doc = new PDFDocument({ margin: 50 });
+        doc.pipe(fs.createWriteStream('daily_report.pdf'));
+        
+        // Header
+        doc.fillColor('#000000').fontSize(24).text('Godzilla HFT Protocol', { align: 'center' });
+        doc.fillColor('#555555').fontSize(12).text('Automated Daily Execution Audit', { align: 'center' });
+        doc.moveDown(2);
+        
+        // Stats
+        doc.fillColor('#000000').fontSize(14).text(`Date: ${new Date().toLocaleDateString()}`);
+        doc.text(`Time: ${new Date().toLocaleTimeString()} (UTC)`);
+        doc.text(`Total Trades: ${trades.length}`);
+        
+        // Color code PnL
+        const pnlColor = dailyPnL >= 0 ? '#22c55e' : '#ef4444';
+        doc.fillColor(pnlColor).text(`Net Daily PnL: $${dailyPnL.toFixed(2)}`);
+        doc.moveDown(2);
+        
+        // Trades
+        doc.fillColor('#000000').fontSize(16).text('Trade History Log:', { underline: true });
+        doc.moveDown();
+        
+        trades.forEach((t, i) => {
+            const resColor = t.status === 'WON' ? '#22c55e' : '#ef4444';
+            doc.fillColor('#000000').fontSize(12).text(`Trade #${i+1} | ${t.time}`);
+            doc.text(`Asset: ${t.asset} | Route: ${t.dir} | Confidence: ${t.conf}%`);
+            doc.text(`Entry: $${t.entry.toFixed(4)}`);
+            doc.text(`Exit: $${t.closingPrice ? t.closingPrice.toFixed(4) : 'N/A'}`);
+            
+            doc.fillColor(resColor).text(`Result: ${t.status} | PnL: $${t.profit.toFixed(2)}`);
+            doc.moveDown();
+        });
+        
+        doc.end();
+        console.log(">>> OFFICIAL PDF & JSON AUDITS GENERATED FOR GITHUB ARTIFACTS.");
+    } catch (e) {
+        console.log("PDF Generation failed", e);
+    }
 }
 
 console.log("--- GODZILLA HFT HEADLESS ENGINE STARTED ---");
@@ -48,18 +94,16 @@ async function scan() {
   if (dynamicPairs.length === 0) return; 
 
   // 1. DAILY LIMITS
-  if (dailyPnL >= 10) { 
+  if (dailyPnL >= 10 || dailyPnL <= -2) { 
     console.log("========================================");
-    console.log(`  TARGET HIT: $${dailyPnL.toFixed(2)}. HIBERNATING.`);
+    if (dailyPnL >= 10) console.log(`  TARGET HIT: $${dailyPnL.toFixed(2)}. HIBERNATING.`);
+    else console.log(`  MAX LOSS HIT: $${dailyPnL.toFixed(2)}. HIBERNATING.`);
     console.log("========================================");
-    process.exit(0); 
-  }
-  
-  if (dailyPnL <= -10) { // Allowed buffer max to support $5 losses
-    console.log("========================================");
-    console.log("  MAX DAILY LOSS HIT. HIBERNATING.");
-    console.log("========================================");
-    process.exit(0); 
+    
+    // GENERATE PDF REPORT BEFORE SHUTTING DOWN
+    generateReports();
+    setTimeout(() => process.exit(0), 2000); 
+    return;
   }
 
   // 2. REAL MARKET RESOLUTION TRACKER
@@ -71,7 +115,6 @@ async function scan() {
           let won = false;
           let lost = false;
 
-          // Checking if the real Binance price has gapped 1% 
           if (activeTrade.dir === 'LONG') {
               if (currentPrice >= activeTrade.tp) won = true;
               if (currentPrice <= activeTrade.sl) lost = true;
@@ -81,7 +124,7 @@ async function scan() {
           }
 
           if (won || lost) {
-             const profit = won ? 5.00 : -5.00; // STRICT $5 TAKE PROFIT / STOP LOSS
+             const profit = won ? 5.00 : -2.00; 
              dailyPnL += profit;
              totalPnL += profit;
              
@@ -92,6 +135,9 @@ async function scan() {
              
              console.log(`> [EXECUTION] ${activeTrade.status}! Exit Price: $${currentPrice.toFixed(4)} | Profit: $${profit.toFixed(2)} | Today: $${dailyPnL.toFixed(2)} / $10.00`);
              activeTrade = null; 
+             
+             // Generate report on every trade completion just to be safe
+             generateReports();
           } else {
              console.log(`[TRACKING] ${activeTrade.asset} ${activeTrade.dir} | Entry: $${activeTrade.entry.toFixed(4)} | Live: $${currentPrice.toFixed(4)}... Waiting for Target`);
           }
@@ -109,9 +155,9 @@ async function scan() {
       livePrices[asset] = price;
   } catch(e) { }
 
-  // 4. GODZILLA CONSENSUS ENGINE (Random Walk + Node Analysis)
+  // 4. GODZILLA CONSENSUS ENGINE
   const currentTps = 1.5 + Math.random() * 3.5;
-  if (currentTps < 2.5) return; // TPS must be > 2.5 for any signal to fire
+  if (currentTps < 2.5) return; 
 
   const rWalkForward = randomWalk(price, 0.0001, 0.02);
   const isDotsInflow = Math.random() > 0.4;
@@ -122,39 +168,34 @@ async function scan() {
   if (isDotsInflow === isOrderBookHeavyBid) score += 40; 
   if ((rWalkForward > price && isDotsInflow) || (rWalkForward < price && !isDotsInflow)) score += 35; 
   
-  if (score >= 80) { // STRICT 80% CONFIDENCE REQUIREMENT
+  if (score >= 80) { 
     const dir = isOrderBookHeavyBid ? 'LONG' : 'SHORT';
-    
-    // $5 Target at 50x Margin = 1% exact price movement
-    const move = price * 0.01;
+    const tpMove = price * 0.01;  // 1% price move for $5
+    const slMove = price * 0.004; // Strict 0.4% price check for $2 cutoff
     const decimals = price.toString().split('.')[1]?.length || 4;
     
-    const tp = parseFloat((dir === 'LONG' ? price + move : price - move).toFixed(decimals));
-    const sl = parseFloat((dir === 'LONG' ? price - move : price + move).toFixed(decimals));
+    const tp = parseFloat((dir === 'LONG' ? price + tpMove : price - tpMove).toFixed(decimals));
+    const sl = parseFloat((dir === 'LONG' ? price - slMove : price + slMove).toFixed(decimals));
 
     console.log(`\n> [GODZILLA LEAD] ${asset} at $${price.toFixed(4)} | CONFIDENCE: ${score}% | DIR: ${dir}`);
-    console.log(`  |- Real 1% TP: $${tp.toFixed(4)} | Real 1% SL: $${sl.toFixed(4)}`);
+    console.log(`  |- Real TP: $${tp.toFixed(4)} | Real SL: $${sl.toFixed(4)} (Max -$2 Limit)`);
     console.log(`  |- Target: $5 Profit | 50x Leverage Engaged...`);
     
     activeTrade = {
         time: new Date().toISOString(),
-        asset, dir, entry: price, tp, sl
+        asset, dir, entry: price, tp, sl, conf: score
     };
   }
 }
 
-// BOOT SEQUENCE
 initTop200().then(() => {
   setInterval(scan, 5000);
 });
 
-// HOURLY REPORT GENERATOR
-setInterval(() => {
-  const report = { timestamp: new Date().toISOString(), dailyPnL, totalPnL, tradeCount: trades.length, trades };
-  fs.writeFileSync('daily_report.json', JSON.stringify(report, null, 2));
-}, 1800000); 
+// Periodic backup
+setInterval(generateReports, 1800000); 
 
 process.on('SIGINT', () => {
-    fs.writeFileSync('daily_report.json', JSON.stringify({timestamp: new Date().toISOString(), dailyPnL, totalPnL, trades}, null, 2));
-    process.exit(0);
+    generateReports();
+    setTimeout(() => process.exit(0), 1000);
 });

@@ -124,10 +124,13 @@ export default function App() {
     if (score >= CONSTANTS.MIN_CONFIDENCE) {
         const dir = isOrderBookHeavyBid ? 'LONG' : 'SHORT';
         
-        // $5 Profit on a 50x $10 margin means a strict 1% price movement requirement.
-        const gap = price * 0.01; 
-        const tp = dir === 'LONG' ? price + gap : price - gap;
-        const sl = dir === 'LONG' ? price - gap : price + gap;
+        // $5 Profit on a 50x $10 margin means a 1% price move.
+        // $2 Stop Loss on a 50x $10 margin means a 0.4% price check gap.
+        const tpGap = price * 0.01; 
+        const slGap = price * 0.004;
+        
+        const tp = dir === 'LONG' ? price + tpGap : price - tpGap;
+        const sl = dir === 'LONG' ? price - slGap : price + slGap;
 
         const tradeData = {
            id: Date.now(),
@@ -173,7 +176,7 @@ export default function App() {
     }
 
     if (won || lost) {
-       const finalPnl = won ? 5.00 : -5.00;
+       const finalPnl = won ? 5.00 : -2.00; // Strict RR Limit
        setLivePnl(p => p + finalPnl);
        
        const record = { ...trade, exit: currentPrice, pnl: finalPnl, res: won ? 'WON' : 'LOST' };
