@@ -2,30 +2,41 @@ name: Godzilla HFT Automation
 
 on:
   schedule:
-    - cron: '0 * * * *' # Run every hour
-  workflow_dispatch:
+    - cron: '0 * * * *' # Run automatically every hour 
+  workflow_dispatch:    # Allow manual triggering
 
 jobs:
   trade:
     runs-on: ubuntu-latest
+    
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
 
       - name: Install Dependencies
-        run: npm install axios
+        run: |
+          # If the bot operates inside the bitnode-v4 folder, enter it 
+          # Or if the file is deployed at the root, npm install will run there.
+          if [ -d "bitnode-v4" ]; then cd bitnode-v4; fi
+          npm install axios
 
-      - name: Run Godzilla Headless
-        run: node bot-headless.js
-        timeout-minutes: 55 # Run for nearly an hour
+      - name: Run Godzilla Headless Engine
+        run: |
+          if [ -d "bitnode-v4" ]; then cd bitnode-v4; fi
+          node bot-headless.js
+        timeout-minutes: 55
 
-      - name: Upload Daily Report
-        uses: actions/upload-artifact@v3
+      - name: Upload Daily Profit Report
+        # Uses the latest v4 artifact action to prevent deprecation failures
+        uses: actions/upload-artifact@v4
         with:
           name: godzilla-hourly-report
-          path: daily_report.json
+          path: |
+            daily_report.json
+            bitnode-v4/daily_report.json
+          if-no-files-found: ignore
