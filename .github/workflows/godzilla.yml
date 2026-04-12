@@ -1,0 +1,31 @@
+name: Godzilla HFT Automation
+
+on:
+  schedule:
+    - cron: '0 * * * *' # Run every hour (Headless Mode)
+  workflow_dispatch:    # This allows you to run it manually!
+
+jobs:
+  trade:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install Dependencies
+        run: npm install axios
+
+      - name: Run Godzilla Headless
+        run: node bot-headless.js
+        timeout-minutes: 55
+
+      - name: Upload Daily Report
+        uses: actions/upload-artifact@v3
+        with:
+          name: godzilla-hourly-report
+          path: daily_report.json
