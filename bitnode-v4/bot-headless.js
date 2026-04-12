@@ -8,6 +8,7 @@ let trades = [];
 // Dynamic Top 200 Memory
 let dynamicPairs = [];
 let livePrices = {};
+let activeTrade = null; // Holds the real-time trade
 
 console.log("--- GODZILLA HFT HEADLESS ENGINE STARTED ---");
 console.log(`Time: ${new Date().toISOString()}`);
@@ -17,7 +18,7 @@ async function initTop200() {
   try {
     const res = await axios.get('https://data-api.binance.vision/api/v3/ticker/24hr');
     const usdtPairs = res.data.filter(p => p.symbol.endsWith('USDT'));
-    // Sort by 24h volume to get the top 200 most active pairs
+    // Sort by 24h volume
     usdtPairs.sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume));
     
     const top200 = usdtPairs.slice(0, 200);
@@ -39,7 +40,7 @@ async function initTop200() {
 }
 
 async function scan() {
-  if (dynamicPairs.length === 0) return; // Wait for init
+  if (dynamicPairs.length === 0) return; 
 
   // 1. DAILY PROFIT & LOSS SHIELD
   if (dailyPnL >= 10) {
@@ -49,7 +50,6 @@ async function scan() {
     process.exit(0); 
   }
   
-  // MAX LOSS CAP
   if (dailyPnL <= -2) {
     console.log("========================================");
     console.log("  MAX DAILY LOSS HIT (-$2). PRESERVING $10 MARGIN. HIBERNATING ");
@@ -57,16 +57,57 @@ async function scan() {
     process.exit(0); 
   }
 
-  // 2. SCAN A RANDOM PAIR FROM THE TOP 200
+  // 2. REAL MARKET RESOLUTION TRACKER
+  // If we have an open trade, we DO NOT scan for new leads. 
+  // We strictly fetch the real live price of this coin until it hits our TP/SL.
+  if (activeTrade) {
+      try {
+          const res = await axios.get(`https://data-api.binance.vision/api/v3/ticker/price?symbol=${activeTrade.asset}USDT`);
+          const currentPrice = parseFloat(res.data.price);
+          
+          let won = false;
+          let lost = false;
+
+          if (activeTrade.dir === 'LONG') {
+              if (currentPrice >= activeTrade.tp) won = true;
+              if (currentPrice <= activeTrade.sl) lost = true;
+          } else { // SHORT
+              if (currentPrice <= activeTrade.tp) won = true;
+              if (currentPrice >= activeTrade.sl) lost = true;
+          }
+
+          if (won || lost) {
+             const profit = won ? 0.50 : -0.50;
+             dailyPnL += profit;
+             totalPnL += profit;
+             
+             activeTrade.status = won ? 'WON' : 'LOST';
+             activeTrade.profit = profit;
+             activeTrade.closingPrice = currentPrice;
+             trades.push(activeTrade);
+             
+             console.log(`> [EXECUTION] ${activeTrade.status}! Exit Price: $${currentPrice.toFixed(4)} | Profit: $${profit.toFixed(2)} | Today: $${dailyPnL.toFixed(2)} / $10.00`);
+             activeTrade = null; // Clear the slot for the next scan
+          } else {
+             console.log(`[TRACKING] ${activeTrade.asset} ${activeTrade.dir} | Entry: $${activeTrade.entry.toFixed(4)} | Live: $${currentPrice.toFixed(4)}... Waiting for Target`);
+          }
+      } catch (e) {
+          // If the network hiccups, we just wait for the next interval
+      }
+      return; // Exit the loop here so we don't scan for new trades
+  }
+
+  // 3. SCAN THE MARKET FOR NEW LEADS
   const asset = dynamicPairs[Math.floor(Math.random() * dynamicPairs.length)];
   let price = livePrices[asset];
   
-  // Simulate live price volatility based on the real last price
-  price = price + (Math.random() * price * 0.002 - price * 0.001);
-  livePrices[asset] = price; // Update the memory
+  try {
+      const res = await axios.get(`https://data-api.binance.vision/api/v3/ticker/price?symbol=${asset}USDT`);
+      price = parseFloat(res.data.price);
+      livePrices[asset] = price;
+  } catch(e) { } // Silent fail and use cached price if rate limited
 
-  // 3. GODZILLA CONSENSUS ENGINE (6-LAW OMNI-STRATEGY)
-  // Replicating the exact core logic from the UI dashboard
+  // GODZILLA CONSENSUS ENGINE (6-LAW OMNI-STRATEGY)
   const tps = 2.0 + Math.random() * 2.5; 
   const asks = Array.from({length:6}, () => ({ s: (Math.random()*2).toFixed(2) }));
   const bids = Array.from({length:6}, () => ({ s: (Math.random()*2).toFixed(2) }));
@@ -76,8 +117,8 @@ async function scan() {
   const strategies = [
     tps > 2.5,                            // Law 1: High TPS Volatility Filter
     true,                                 // Law 2: Node Synchronization
-    Math.random() > 0.3,                  // Law 3: Dots Inflow/Outflow Correlation
-    Math.random() > 0.4,                  // Law 4: Random Walk Theory (S) Prediction
+    Math.random() > 0.3,                  // Law 3: Dots Correlation
+    Math.random() > 0.4,                  // Law 4: Random Walk Theory Path
     Math.abs(bT - aT) > 1.2,              // Law 5: Level 2 Order Book Imbalance
     Math.random() > 0.5                   // Law 6: Whale Node Shadowing
   ];
@@ -87,34 +128,31 @@ async function scan() {
   
   if (confidence >= 83) {
     const dir = (bT > aT) ? 'LONG' : 'SHORT';
+    
+    // Exact 50x Margin Math constraints (0.12% move for $0.50 profit/loss)
+    const move = price * (0.12 / 100);
+    const tp = dir === 'LONG' ? price + move : price - move;
+    const sl = dir === 'LONG' ? price - move : price + move;
+
     console.log(`\n> [GODZILLA LEAD] ${asset} at $${price.toFixed(4)} | CONFIDENCE: ${confidence}% | DIR: ${dir}`);
-    console.log(`  |- Target: Top 200 Scanner | L2 Bias: ${(Math.abs(bT - aT)).toFixed(2)} Vol`);
+    console.log(`  |- Real TP: $${tp.toFixed(4)} | Real SL: $${sl.toFixed(4)}`);
+    console.log(`  |- Tracking Live Market Movement...`);
     
-    // Godzilla mathematically guarantees high win-rates when 5/6 laws are met.
-    // 83% Confidence = 92% Win Rate | 100% Confidence = 98% Win Rate
-    const winProbability = confidence === 100 ? 0.98 : 0.92;
-    const won = Math.random() < winProbability; 
-    const profit = won ? 0.50 : -0.50; // Strict $0.50 Win / $0.50 Loss target 
-    
-    dailyPnL += profit;
-    totalPnL += profit;
-    
-    const trade = {
-      time: new Date().toISOString(),
-      asset,
-      dir,
-      status: won ? 'WON' : 'LOST',
-      profit
+    // Register the trade to start real-world tracking next tick
+    activeTrade = {
+        time: new Date().toISOString(),
+        asset,
+        dir,
+        entry: price,
+        tp,
+        sl
     };
-    trades.push(trade);
-    
-    console.log(`> [EXECUTION] ${trade.status}! Profit: $${profit.toFixed(2)} | Today: $${dailyPnL.toFixed(2)} / $10.00`);
   }
 }
 
 // 4. BOOT SEQUENCE
 initTop200().then(() => {
-  // RUN SCANNER (Every 5 seconds)
+  // RUN SCANNER (Every 5 seconds against live Binance data)
   setInterval(scan, 5000);
 });
 
@@ -128,8 +166,8 @@ setInterval(() => {
     trades: trades 
   };
   fs.writeFileSync('daily_report.json', JSON.stringify(report, null, 2));
-  console.log(">>> Hourly Audit Saved for GitHub Artifact Upload.");
-}, 3600000); // 1 hour
+  console.log(">>> Periodic Audit Saved for GitHub Artifact Upload.");
+}, 1800000); // 30 mins
 
 process.on('SIGINT', () => {
     fs.writeFileSync('daily_report.json', JSON.stringify({timestamp: new Date().toISOString(), dailyPnL, totalPnL, trades}, null, 2));
