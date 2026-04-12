@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "@babel/parser": "^7.29.2",
+    "jsdom": "^29.0.2"
+  }
+}

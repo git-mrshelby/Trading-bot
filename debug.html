@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+<script>
+window.onerror = function(msg, url, lineNo, columnNo, error) {
+  document.body.innerHTML = '<div style="color:red; font-size: 20px; padding: 20px;">ERROR: ' + msg + '<br>Line: ' + lineNo + '<br>Col: ' + columnNo + '<br>' + (error && error.stack) + '</div>';
+  return false;
+};
+window.addEventListener('unhandledrejection', function(event) {
+  document.body.innerHTML = '<div style="color:red; font-size: 20px; padding: 20px;">PROMISE ERROR: ' + event.reason + '</div>';
+});
+</script>
+<script>
+// Load the actual file content
+fetch('index.html').then(r => r.text()).then(html => {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+  
+  // extract scripts and styles
+  // wait, easier to just redirect to a modified index.html
+});
+</script>
+</head>
+<body>Loading...</body>
+</html>

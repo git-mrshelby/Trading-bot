@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BitNodes HFT | Premium Trading Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #00f2ff;
+            --secondary: #7000ff;
+            --bg: #050508;
+            --card-bg: rgba(255, 255, 255, 0.03);
+            --border: rgba(255, 255, 255, 0.1);
+            --long: #00ff88;
+            --short: #ff3366;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Outfit', sans-serif;
+        }
+
+        html, body {
+            min-height: 100%;
+            background: #050508;
+        }
+
+        body {
+            background-color: var(--bg);
+            color: white;
+            overflow-x: hidden;
+            overflow-y: auto;
+            overscroll-behavior-y: none;
+            background: radial-gradient(circle at top right, #1a1a2e, #050508);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 3rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .logo {
+            font-size: 1.8rem;
+            font-weight: 800;
+            background: linear-gradient(to right, var(--primary), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -1px;
+        }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: var(--card-bg);
+            padding: 8px 16px;
+            border-radius: 20px;
+            border: 1px solid var(--border);
+            font-size: 0.9rem;
+        }
+
+        .pulse {
+            width: 8px;
+            height: 8px;
+            background: var(--long);
+            border-radius: 50%;
+            box-shadow: 0 0 10px var(--long);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.5); opacity: 0.5; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .card {
+            background: var(--card-bg);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--border);
+            padding: 1.5rem;
+            border-radius: 24px;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            border-color: rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .card h3 {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            color: rgba(255, 255, 255, 0.5);
+            margin-bottom: 0.5rem;
+            letter-spacing: 1px;
+        }
+
+        .card .value {
+            font-size: 2rem;
+            font-weight: 600;
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 1.5rem;
+        }
+
+        .signals-panel {
+            height: 600px;
+        }
+
+        .nodes-map {
+            grid-column: span 1;
+        }
+
+        .signal-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem;
+            background: rgba(255, 255, 255, 0.02);
+            border-radius: 16px;
+            margin-bottom: 10px;
+            border-left: 4px solid transparent;
+            animation: slideIn 0.5s ease;
+        }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(-20px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        .signal-item.LONG { border-left-color: var(--long); }
+        .signal-item.SHORT { border-left-color: var(--short); }
+
+        .tag {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .tag.long { background: rgba(0, 255, 136, 0.1); color: var(--long); }
+        .tag.short { background: rgba(255, 51, 102, 0.1); color: var(--short); }
+
+        /* Order Book Viz */
+        .ob-container {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            height: 300px;
+            overflow: hidden;
+        }
+
+        .ob-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            font-size: 0.75rem;
+            padding: 2px 0;
+        }
+
+        .ob-bar {
+            height: 100%;
+            position: absolute;
+            right: 0;
+            top: 0;
+            z-index: -1;
+            opacity: 0.2;
+        }
+
+        .ob-ask { color: var(--short); }
+        .ob-bid { color: var(--long); }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
+
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">BITNODES.HFT</div>
+            <div style="display: flex; gap: 2rem;">
+                <div id="pkt-time" class="status-badge">PKT: 12:00:00</div>
+                <div class="status-badge">
+                    <div class="pulse"></div>
+                    BOT ACTIVE
+                </div>
+            </div>
+        </header>
+
+        <div class="grid">
+            <div class="card">
+                <h3>Global TPS</h3>
+                <div class="value" id="tps-value">2.84</div>
+                <div style="color: var(--long); font-size: 0.8rem; margin-top: 5px;">↑ High Volatility</div>
+            </div>
+            <div class="card">
+                <h3>Active Nodes</h3>
+                <div class="value">14,322</div>
+                <div style="color: rgba(255,255,255,0.5); font-size: 0.8rem; margin-top: 5px;">Global Snapshot</div>
+            </div>
+            <div class="card">
+                <h3>Current Height</h3>
+                <div class="value">832,145</div>
+                <div style="color: var(--long); font-size: 0.8rem; margin-top: 5px;">Stable Cluster</div>
+            </div>
+            <div class="card">
+                <h3>Session</h3>
+                <div class="value" style="font-size: 1.4rem; padding-top: 0.6rem;">EUROPEAN</div>
+                <div style="color: var(--primary); font-size: 0.8rem; margin-top: 5px;">Optimal Trading</div>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="card signals-panel">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                    <h2 style="font-size: 1.2rem;">Live Trading Signals</h2>
+                    <span style="font-size: 0.8rem; color: rgba(255,255,255,0.4);">Updated every 5s</span>
+                </div>
+                <div id="signals-list">
+                    <div class="signal-item LONG">
+                        <div>
+                            <span class="tag long">LONG</span>
+                            <strong style="margin-left: 10px;">BTC/USDT</strong>
+                        </div>
+                        <div style="text-align: right;">
+                            <div style="font-size: 0.9rem;">$65,432.10</div>
+                            <div style="font-size: 0.7rem; color: rgba(255,255,255,0.4);">Confidence: 84%</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card nodes-map">
+                <h2 style="font-size: 1.1rem; margin-bottom: 1rem;">Order Book (BTC)</h2>
+                <div class="ob-container" id="order-book">
+                    <!-- Asks -->
+                    <div class="ob-row ob-ask"><span>65435.0</span><span>0.42</span></div>
+                    <div class="ob-row ob-ask"><span>65434.5</span><span>1.21</span></div>
+                    <div class="ob-row ob-ask"><span>65434.0</span><span>0.85</span></div>
+                    <div class="ob-row ob-ask"><span>65433.5</span><span>2.10</span></div>
+                    <div style="margin: 10px 0; text-align: center; font-size: 1.1rem; font-weight: 600; color: white;">65,432.10</div>
+                    <!-- Bids -->
+                    <div class="ob-row ob-bid"><span>65431.5</span><span>1.15</span></div>
+                    <div class="ob-row ob-bid"><span>65431.0</span><span>3.42</span></div>
+                    <div class="ob-row ob-bid"><span>65430.5</span><span>0.98</span></div>
+                    <div class="ob-row ob-bid"><span>65430.0</span><span>1.55</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Real-time updates simulation
+        function updateData() {
+            const tps = (2.2 + Math.random() * 1.5).toFixed(2);
+            document.getElementById('tps-value').innerText = tps;
+            
+            const now = new Date();
+            document.getElementById('pkt-time').innerText = 'PKT: ' + now.toLocaleTimeString('en-US', { hour12: false, timeZone: 'Asia/Karachi' });
+        }
+
+        setInterval(updateData, 1000);
+    </script>
+</body>
+</html>

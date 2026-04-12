@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BITNODE HFT | STORM-X Protocol v4.0</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <script>
+        // Critical Environment Shims
+        if (!window.matchMedia) { window.matchMedia = () => ({ matches: false, addListener: () => {}, removeListener: () => {} }); }
+        if (!window.ResizeObserver) { window.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} }; }
+    </script>
+    <!-- Core Engine Scripts -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+
+    <style>
+        :root {
+            --primary: #00f2ff;
+            --secondary: #7000ff;
+            --accent: #ff00c8;
+            --success: #00ffa3;
+            --danger: #ff3366;
+            --bg: #020204;
+            --panel: rgba(13, 14, 20, 0.95);
+            --border: rgba(255, 255, 255, 0.08);
+            --text-main: #ffffff;
+            --text-dim: rgba(255, 255, 255, 0.5);
+        }
+
+        * {
+            margin: 0; padding: 0; box-sizing: border-box;
+            font-family: 'Outfit', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        html, body, #root {
+            min-height: 100%;
+            background: #000;
+            color: var(--text-main);
+            overflow-x: hidden;
+        }
+
+        #boot-status-container {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #050505; color: white; transition: opacity 0.5s;
+            display: flex; align-items: center; justify-content: center; z-index: 1000;
+        }
+
+        body {
+            background: 
+                radial-gradient(circle at 0% 0%, rgba(112, 0, 255, 0.15) 0%, transparent 40%),
+                radial-gradient(circle at 100% 100%, rgba(0, 242, 255, 0.1) 0%, transparent 40%),
+                var(--bg);
+            background-attachment: fixed;
+        }
+
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
+
+        .app-grid {
+            max-width: 1700px; margin: 0 auto; padding: 1.5rem;
+            display: grid; grid-template-columns: 1fr; gap: 1.5rem;
+        }
+
+        @media (min-width: 1300px) {
+            .app-grid { grid-template-columns: 320px 1fr 340px; padding: 2rem; }
+        }
+
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 1.5rem;
+            transition: all 0.3s ease;
+        }
+
+        .panel:hover { border-color: rgba(255, 255, 255, 0.15); }
+
+        .gradient-text {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            font-weight: 800;
+        }
+
+        .mono { font-family: 'JetBrains Mono', monospace; }
+
+        /* Animations */
+        @keyframes pulse-cyan {
+            0% { box-shadow: 0 0 0 0 rgba(0, 242, 255, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(0, 242, 255, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(0, 242, 255, 0); }
+        }
+
+        .status-pulse {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: var(--primary); animation: pulse-cyan 2s infinite;
+        }
+
+        .signal-card {
+            border-left: 4px solid var(--primary);
+            margin-bottom: 1rem; position: relative;
+            background: rgba(255,255,255,0.02);
+        }
+        .signal-card.long { border-left-color: var(--success); }
+        .signal-card.short { border-left-color: var(--danger); }
+
+        .stat-value { font-size: 1.6rem; font-weight: 800; }
+        .stat-label { font-size: 0.7rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; }
+
+        .ob-row { position: relative; height: 22px; font-size: 0.8rem; overflow: hidden; margin: 2px 0; }
+        .ob-fill { position: absolute; right: 0; top: 0; height: 100%; opacity: 0.15; transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+
+        .badge {
+            padding: 4px 10px; border-radius: 6px; font-size: 0.7rem; font-weight: 900;
+            text-transform: uppercase; display: inline-block;
+        }
+        .badge.success { background: rgba(0, 255, 163, 0.1); color: var(--success); }
+        .badge.danger { background: rgba(255, 51, 102, 0.1); color: var(--danger); }
+
+        /* Watch Alert */
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+        }
+        .alert-active { animation: shake 0.2s infinite; }
+    </style>
+</head>
+
+<body>
+    <div id="root"></div>
+    <div id="boot-status-container">
+        <div style="text-align: center;">
+            <h1 style="color: #00f2ff; font-weight: 800; letter-spacing: 4px; margin-bottom: 15px;">STORM-X</h1>
+            <p id="boot-status" style="color: rgba(255,255,255,0.4); font-size: 0.8rem; font-family: 'JetBrains Mono', monospace;">INITIALIZING OPTICAL LINK...</p>
+        </div>
+    </div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useMemo } = React;
+
+        // --- HFT CORE CONSTANTS ---
+        const CRYPTO_PAIRS = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOT', 'LINK', 'DOGE', 'MATIC', 'AVAX'];
+        const NODES = [
+            { id: 'LMAX-LND', loc: 'LD4', lat: 0.8, type: 'HFT' },
+            { id: 'CME-CHI', loc: 'CH1', lat: 2.4, type: 'DERIVS' },
+            { id: 'BNB-ASIA', loc: 'TYO', lat: 45.2, type: 'CEX' },
+            { id: 'KRK-EUP', loc: 'FRA', lat: 12.1, type: 'CEX' }
+        ];
+
+        // --- AUDIO ENGINE ---
+        const AudioEngine = {
+            ctx: null,
+            init() {
+                if (this.ctx) return this.ctx;
+                try {
+                    const AudioCtor = window.AudioContext || window.webkitAudioContext;
+                    if (!AudioCtor) return null;
+                    this.ctx = new AudioCtor();
+                    return this.ctx;
+                } catch (e) {
+                    return null;
+                }
+            },
+            playFreq(f, d, vol=0.1) {
+                const ctx = this.init();
+                if (!ctx) return;
+                const o = this.ctx.createOscillator();
+                const g = this.ctx.createGain();
+                o.frequency.setValueAtTime(f, this.ctx.currentTime);
+                g.gain.setValueAtTime(vol, this.ctx.currentTime);
+                g.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + d);
+                o.connect(g); g.connect(this.ctx.destination);
+                o.start(); o.stop(this.ctx.currentTime + d);
+            },
+            signalLong() { this.playFreq(700, 0.3); setTimeout(() => this.playFreq(900, 0.3), 100); },
+            signalShort() { this.playFreq(900, 0.3); setTimeout(() => this.playFreq(700, 0.3), 100); },
+            execution() { this.playFreq(1200, 0.05); }
+        };
+
+        const TRADE = {
+            MARGIN_USD: 10,
+            LEVERAGE: 30,
+            TAKE_PROFIT_USD: 5,
+            STOP_LOSS_USD: 2.5,
+            BREAKEVEN_TRIGGER_USD: 2.5
+        };
+
+        const calcPriceMove = (usd, notional) => (usd / notional) * 100;
+
+        const TradeMonitor = ({ asset, activeTrade, lastPrice, signals }) => {
+            if (!activeTrade) {
+                return (
+                    <div style={{
+                        minHeight: '220px',
+                        borderRadius: '18px',
+                        border: '1px dashed rgba(255,255,255,0.12)',
+                        background: 'rgba(255,255,255,0.02)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: 'var(--text-dim)',
+                        textAlign: 'center',
+                        padding: '1.5rem'
+                    }}>
+                        <div>
+                            <div style={{ color: 'var(--primary)', fontWeight: 800, marginBottom: '0.5rem' }}>No active trade</div>
+                            <div style={{ fontSize: '0.9rem' }}>Scanner is waiting for the next 4/6 setup before opening a new position.</div>
+                        </div>
+                    </div>
+                );
+            }
+
+            const notional = TRADE.MARGIN_USD * TRADE.LEVERAGE;
+            const tpMovePct = calcPriceMove(TRADE.TAKE_PROFIT_USD, notional);
+            const slMovePct = calcPriceMove(TRADE.STOP_LOSS_USD, notional);
+            const beMovePct = calcPriceMove(TRADE.BREAKEVEN_TRIGGER_USD, notional);
+            return (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1rem' }}>
+                    <div style={{
+                        padding: '1rem 1.2rem',
+                        borderRadius: '18px',
+                        border: '1px solid rgba(0,242,255,0.14)',
+                        background: 'linear-gradient(180deg, rgba(0,242,255,0.05), rgba(255,255,255,0.02))'
+                    }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                            <div>
+                                <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', letterSpacing: '1px' }}>ACTIVE EXECUTION</div>
+                                <div style={{ fontSize: '1.5rem', fontWeight: 800 }}>{activeTrade.coin}/USDT</div>
+                            </div>
+                            <div className={`badge ${activeTrade.dir === 'LONG' ? 'success' : 'danger'}`}>{activeTrade.dir}</div>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.85rem' }}>
+                            <div>
+                                <div className="stat-label">Margin</div>
+                                <div className="mono" style={{ fontSize: '1.2rem', fontWeight: 800 }}>${TRADE.MARGIN_USD.toFixed(2)}</div>
+                            </div>
+                            <div>
+                                <div className="stat-label">Leverage</div>
+                                <div className="mono" style={{ fontSize: '1.2rem', fontWeight: 800 }}>{TRADE.LEVERAGE}x</div>
+                            </div>
+                            <div>
+                                <div className="stat-label">Notional</div>
+                                <div className="mono" style={{ fontSize: '1.2rem', fontWeight: 800 }}>${notional.toFixed(2)}</div>
+                            </div>
+                            <div>
+                                <div className="stat-label">Last Price</div>
+                                <div className="mono" style={{ fontSize: '1.2rem', fontWeight: 800 }}>${lastPrice.toFixed(2)}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style={{
+                        padding: '1rem 1.2rem',
+                        borderRadius: '18px',
+                        border: '1px solid rgba(255,255,255,0.08)',
+                        background: 'rgba(255,255,255,0.02)'
+                    }}>
+                        <div className="stat-label" style={{ marginBottom: '0.75rem' }}>Risk Plan</div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.85rem' }}>
+                            <div>
+                                <div className="stat-label">Entry</div>
+                                <div className="mono" style={{ color: 'var(--primary)', fontSize: '1rem', fontWeight: 800 }}>${activeTrade.entry.toFixed(2)}</div>
+                            </div>
+                            <div>
+                                <div className="stat-label">Take Profit</div>
+                                <div className="mono" style={{ color: 'var(--success)', fontSize: '1rem', fontWeight: 800 }}>${activeTrade.tp.toFixed(2)} (+$5.00)</div>
+                            </div>
+                            <div>
+                                <div className="stat-label">Stop Loss</div>
+                                <div className="mono" style={{ color: 'var(--danger)', fontSize: '1rem', fontWeight: 800 }}>${activeTrade.sl.toFixed(2)} (-$2.50)</div>
+                            </div>
+                            <div>
+                                <div className="stat-label">Breakeven</div>
+                                <div className="mono" style={{ color: 'var(--accent)', fontSize: '1rem', fontWeight: 800 }}>+${TRADE.BREAKEVEN_TRIGGER_USD.toFixed(2)}</div>
+                            </div>
+                        </div>
+                        <div style={{ marginTop: '0.85rem', fontSize: '0.8rem', color: 'var(--text-dim)', lineHeight: 1.5 }}>
+                            TP move: {tpMovePct.toFixed(2)}% of notional. SL move: {slMovePct.toFixed(2)}% of notional. Breakeven moves in after {beMovePct.toFixed(2)}% favorable price move.
+                        </div>
+                    </div>
+
+                    <div style={{
+                        padding: '0.9rem 1rem',
+                        borderRadius: '18px',
+                        border: '1px solid rgba(255,255,255,0.08)',
+                        background: 'rgba(255,255,255,0.02)'
+                    }}>
+                        <div className="stat-label" style={{ marginBottom: '0.6rem' }}>Scanner State</div>
+                        <div style={{ fontSize: '0.9rem', color: 'var(--text-main)' }}>
+                            Waiting for TP or SL to resolve before the next scan.
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '0.35rem' }}>
+                            {signals.filter(s => s.coin === asset).length} signals tracked for this asset.
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- MAIN APPLICATION ---
+        const StormQuant = () => {
+            const [asset, setAsset] = useState('BTC');
+            const [priceData, setPriceData] = useState([]);
+            const [signals, setSignals] = useState([]);
+            const [orderBook, setOrderBook] = useState({ bids: [], asks: [], last: 65000 });
+            const [stats, setStats] = useState({ tps: 2.8, pnl: 14250, winRate: 84.2 });
+            const [nodes, setNodes] = useState(NODES);
+            const [strategies, setStrategies] = useState({ s1:0, s2:0, s3:0, s4:0, s5:0, s6:0 });
+            const [whales, setWhales] = useState([]);
+            const activeTradeRef = useRef(null);
+
+            // Ref-based engine to avoid interval staleness
+            const stateRef = useRef({ asset, priceData, signals, orderBook });
+            useEffect(() => { stateRef.current = { asset, priceData, signals, orderBook }; }, [asset, priceData, signals, orderBook]);
+
+            // History Generation
+            useEffect(() => {
+                const base = { BTC: 65000, ETH: 3500, SOL: 140, XRP: 0.6, ADA: 0.4, DOT: 7, LINK: 18, DOGE: 0.1, MATIC: 0.8, AVAX: 40 }[asset];
+                const now = Math.floor(Date.now() / 1000);
+                const start = now - (now % 60);
+                let lv = base;
+                const hist = Array.from({length:60}, (_, i) => {
+                    const t = start - (60-i)*60;
+                    const o = lv; const c = o + (Math.random()*base*0.001 - base*0.0005);
+                    lv = c;
+                    return { time: t, open: o, high: Math.max(o,c)+base*0.0002, low: Math.min(o,c)-base*0.0002, close: c };
+                });
+                setPriceData(hist);
+            }, [asset]);
+
+            // Engine Loop (1Hz)
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    const s = stateRef.current;
+                    const now = Math.floor(Date.now() / 1000);
+                    const minute = now - (now % 60);
+                    const activeTrade = activeTradeRef.current;
+                    let tradeClosedThisTick = false;
+                    
+                    // 1. Simulator: Price Update
+                    const volatility = 40;
+                    const tick = s.priceData[s.priceData.length-1]?.close || 65000;
+                    const newPrice = tick + (Math.random()*volatility - volatility/2);
+                    
+                    // 2. Simulator: Order Book Imbalance (L2 Strategy)
+                    const asks = Array.from({length:8}, (_,i) => ({ p: newPrice + (i+1)*2, s: (Math.random()*5).toFixed(2), t: 0 })).reverse();
+                    const bids = Array.from({length:8}, (_,i) => ({ p: newPrice - (i+1)*2, s: (Math.random()*5).toFixed(2), t: 0 }));
+                    let aT=0; asks.reverse().forEach(a => { aT += parseFloat(a.s); a.t = aT; });
+                    let bT=0; bids.forEach(b => { bT += parseFloat(b.s); b.t = bT; });
+                    setOrderBook({ asks: asks.reverse(), bids, last: newPrice });
+
+                    // 3. Chart Update
+                    setPriceData(prev => {
+                        if (prev.length === 0) return prev;
+                        const last = prev[prev.length-1];
+                        const safeTime = Math.max(minute, last.time);
+                        let next = [...prev];
+                        if (last.time === safeTime) {
+                            next[next.length-1] = { ...last, close: newPrice, high: Math.max(last.high, newPrice), low: Math.min(last.low, newPrice) };
+                        } else {
+                            next.push({ time: safeTime, open: last.close, high: newPrice, low: newPrice, close: newPrice });
+                        }
+                        return next.slice(-100);
+                    });
+
+                    // 4. Whale Tracker Simulation (Inflow/Outflow)
+                    if (Math.random() > 0.9) {
+                        const amount = (Math.random()*500).toFixed(1);
+                        const type = Math.random() > 0.5 ? 'INFLOW' : 'OUTFLOW';
+                        setWhales(prev => [{ id: Date.now(), asset: s.asset, amount, type, time: new Date().toLocaleTimeString() }, ...prev.slice(0,4)]);
+                    }
+
+                    // 5. Strategy Evaluation (6 Core Conditions)
+                    const conds = {
+                        s1: Math.random() > 0.6 ? 1 : 0, s2: Math.random() > 0.7 ? 1 : 0, s3: Math.random() > 0.65 ? 1 : 0,
+                        s4: Math.random() > 0.8 ? 1 : 0, s5: Math.random() > 0.7 ? 1 : 0, s6: Math.random() > 0.75 ? 1 : 0
+                    };
+                    setStrategies(conds);
+                    const weight = Object.values(conds).reduce((a,b)=>a+b, 0);
+
+                    // 6. Active Trade Management
+                    if (activeTrade) {
+                        const directionFactor = activeTrade.dir === 'LONG' ? 1 : -1;
+                        const pnl = ((newPrice - activeTrade.entry) / activeTrade.entry) * activeTrade.notional * directionFactor;
+
+                        if (!activeTrade.breakevenLocked && pnl >= TRADE.BREAKEVEN_TRIGGER_USD) {
+                            activeTrade.breakevenLocked = true;
+                            activeTrade.sl = activeTrade.entry;
+                            setSignals(prev => prev.map(sig => sig.id === activeTrade.id ? { ...sig, sl: activeTrade.entry.toFixed(2), breakevenLocked: true } : sig));
+                        }
+
+                        let resolved = false;
+                        let status = 'ACTIVE';
+                        if (pnl >= TRADE.TAKE_PROFIT_USD) {
+                            resolved = true;
+                            status = 'WON';
+                        } else if (activeTrade.breakevenLocked && pnl <= 0) {
+                            resolved = true;
+                            status = 'BREAKEVEN';
+                        } else if (!activeTrade.breakevenLocked && pnl <= -TRADE.STOP_LOSS_USD) {
+                            resolved = true;
+                            status = 'LOST';
+                        }
+
+                        if (resolved) {
+                            setSignals(prev => prev.map(sig => sig.id === activeTrade.id ? { ...sig, status } : sig));
+                            setStats(p => ({
+                                ...p,
+                                pnl: p.pnl + (status === 'WON' ? TRADE.TAKE_PROFIT_USD : status === 'LOST' ? -TRADE.STOP_LOSS_USD : 0),
+                                trades: (p.trades || 142) + 1
+                            }));
+                            activeTradeRef.current = null;
+                            tradeClosedThisTick = true;
+                            AudioEngine.execution();
+                        }
+                    }
+
+                    // 7. Signal Execution
+                    if (!activeTradeRef.current && !tradeClosedThisTick && weight >= 4) {
+                        const dir = Math.random() > 0.5 ? 'LONG' : 'SHORT';
+                        const notional = TRADE.MARGIN_USD * TRADE.LEVERAGE;
+                        const tpMove = TRADE.TAKE_PROFIT_USD / notional;
+                        const slMove = TRADE.STOP_LOSS_USD / notional;
+                        const beMove = TRADE.BREAKEVEN_TRIGGER_USD / notional;
+                        const tp = dir === 'LONG' ? newPrice * (1 + tpMove) : newPrice * (1 - tpMove);
+                        const sl = dir === 'LONG' ? newPrice * (1 - slMove) : newPrice * (1 + slMove);
+                        const be = dir === 'LONG' ? newPrice * (1 + beMove) : newPrice * (1 - beMove);
+                        const signal = {
+                            id: Date.now(),
+                            time: minute,
+                            coin: s.asset,
+                            dir,
+                            entry: newPrice.toFixed(2),
+                            tp: tp.toFixed(2),
+                            sl: sl.toFixed(2),
+                            be: be.toFixed(2),
+                            margin: TRADE.MARGIN_USD.toFixed(2),
+                            leverage: `${TRADE.LEVERAGE}x`,
+                            notional: notional.toFixed(2),
+                            tpUsd: TRADE.TAKE_PROFIT_USD.toFixed(2),
+                            slUsd: TRADE.STOP_LOSS_USD.toFixed(2),
+                            status: 'ACTIVE',
+                            weight,
+                            timestamp: new Date().toLocaleTimeString(),
+                            breakevenLocked: false
+                        };
+                        activeTradeRef.current = {
+                            ...signal,
+                            entry: newPrice,
+                            tp,
+                            sl,
+                            be,
+                            notional,
+                            breakevenLocked: false
+                        };
+                        setSignals(prev => [signal, ...prev.slice(0, 19)]);
+                        if (dir === 'LONG') AudioEngine.signalLong(); else AudioEngine.signalShort();
+                    }
+
+                    // 8. Asset Rotation (Only if idle)
+                    if (!activeTradeRef.current && !tradeClosedThisTick) {
+                        setAsset(prev => {
+                            const idx = CRYPTO_PAIRS.indexOf(prev);
+                            return CRYPTO_PAIRS[(idx + 1) % CRYPTO_PAIRS.length];
+                        });
+                    }
+
+                    // 9. Node Jitter
+                    setNodes(prev => prev.map(n => ({ ...n, lat: Math.max(0.1, n.lat + (Math.random()*0.4 - 0.2)) })));
+                    setStats(p => ({ ...p, tps: 2.5 + Math.random()*2 }));
+
+                }, 1000);
+                return () => clearInterval(interval);
+            }, []);
+
+            const activeSig = signals.find(s => s.status === 'ACTIVE');
+            const activeTrade = activeSig ? {
+                ...activeSig,
+                entry: parseFloat(activeSig.entry),
+                tp: parseFloat(activeSig.tp),
+                sl: parseFloat(activeSig.sl)
+            } : null;
+
+            return (
+                <div className={`app-grid ${activeSig ? 'alert-active' : ''}`}>
+                    {/* Header */}
+                    <header style={{ gridColumn: '1/-1', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                            <h1 className="gradient-text" style={{ fontSize: '2.4rem', letterSpacing: '-1px' }}>STORM<span style={{ color: 'white', fontWeight: 300 }}>-X</span></h1>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '-5px' }}>
+                                <div className="status-pulse"></div>
+                                <span className="mono" style={{ fontSize: '0.7rem', color: 'var(--primary)', letterSpacing: '2px' }}>QUANTUM HFT NODE CONNECTED</span>
+                            </div>
+                        </div>
+                        <div className="panel" style={{ padding: '0.8rem 1.5rem', display: 'flex', gap: '2rem', borderRadius: '15px' }}>
+                            <div><div className="stat-label">Daily PnL</div><div className="mono" style={{ color: 'var(--success)', fontWeight: 800 }}>+${stats.pnl.toLocaleString()}</div></div>
+                            <div><div className="stat-label">Win Rate</div><div className="mono" style={{ color: 'white', fontWeight: 800 }}>{stats.winRate}%</div></div>
+                        </div>
+                    </header>
+
+                    {/* Left Column: Analytics */}
+                    <aside className="main-column">
+                        <div className="panel">
+                            <h3 className="stat-label" style={{ marginBottom: '1.2rem' }}>HFT Execution Nodes</h3>
+                            {nodes.map(n => (
+                                <div key={n.id} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.8rem', fontSize: '0.85rem' }}>
+                                    <div><span style={{ fontWeight: 800 }}>{n.id}</span> <br/><span style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>{n.loc} | {n.type}</span></div>
+                                    <div className="mono" style={{ color: n.lat < 1 ? 'var(--primary)' : 'white' }}>{n.lat.toFixed(2)}ms</div>
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1.5rem', marginTop: '1.5rem' }}>
+                            <div className="panel" style={{ textAlign: 'center' }}>
+                                <div className="stat-label">Network Flow</div>
+                                <div className="stat-value mono" style={{ color: stats.tps > 3.5 ? 'var(--accent)' : 'var(--primary)' }}>{stats.tps.toFixed(2)}k/s</div>
+                            </div>
+                            <div className="panel" style={{ textAlign: 'center' }}>
+                                <div className="stat-label">Optimal Node</div>
+                                <div className="stat-value mono">
+                                    {nodes.length > 0 ? nodes.reduce((p, c) => p.lat < c.lat ? p : c).id : 'CONNECTING'}
+                                </div>
+                            </div>
+                            <div className="panel" style={{ textAlign: 'center' }}>
+                                <div className="stat-label">Liquidity Status</div>
+                                <div className="stat-value" style={{ fontSize: '1rem', color: 'var(--primary)', padding: '0.4rem 0' }}>EXTREME</div>
+                            </div>
+                            <div className="panel" style={{ textAlign: 'center' }}>
+                                <div className="stat-label">Quantum PnL</div>
+                                <div className="stat-value mono" style={{ color: 'var(--success)' }}>+${stats.pnl.toLocaleString()}</div>
+                            </div>
+                        </div>
+
+                        <div className="panel" style={{ marginTop: '1.5rem' }}>
+                            <h3 className="stat-label" style={{ marginBottom: '1.2rem' }}>Quantum Consenus (6/6)</h3>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                                {Object.entries(strategies).map(([k, v], i) => (
+                                    <div key={k} style={{ 
+                                        padding: '10px', borderRadius: '10px', background: v ? 'rgba(0, 255, 163, 0.05)' : 'rgba(255,255,255,0.02)',
+                                        border: `1px solid ${v ? 'var(--success)' : 'transparent'}`, transition: 'all 0.3s'
+                                    }}>
+                                        <div style={{ fontSize: '0.6rem', color: v ? 'var(--success)' : 'var(--text-dim)' }}>STRAT 0{i+1}</div>
+                                        <div style={{ fontSize: '0.75rem', fontWeight: 800, color: v ? 'white' : 'var(--text-dim)' }}>{v ? 'MATCH' : 'WAITING'}</div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="panel" style={{ marginTop: '1.5rem' }}>
+                            <h3 className="stat-label" style={{ marginBottom: '1.2rem' }}>Whale Inflow Tracker</h3>
+                            {whales.map(w => (
+                                <div key={w.id} style={{ padding: '10px', background: 'rgba(255,255,255,0.02)', borderRadius: '10px', marginBottom: '0.5rem', borderLeft: `2px solid ${w.type === 'INFLOW' ? 'var(--success)' : 'var(--accent)'}` }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem' }}>
+                                        <span style={{ color: w.type === 'INFLOW' ? 'var(--success)' : 'var(--accent)', fontWeight: 800 }}>{w.type}</span>
+                                        <span className="mono">{w.time}</span>
+                                    </div>
+                                    <div style={{ fontWeight: 800, fontSize: '0.8rem' }}>{w.amount} {w.asset} Detected</div>
+                                </div>
+                            ))}
+                        </div>
+                    </aside>
+
+                    {/* Center Column: Execution */}
+                    <main className="main-column">
+                        <div className="panel" style={{ minHeight: '500px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                                <h2 style={{ fontSize: '1.4rem' }}>Trade Execution: <span className="gradient-text">{asset}/USDT</span></h2>
+                                <div className="badge success">Scanner Paused During Trade</div>
+                            </div>
+                            <TradeMonitor asset={asset} activeTrade={activeTrade} lastPrice={orderBook.last} signals={signals} />
+                            
+                            <div style={{ marginTop: '2rem' }}>
+                                <h3 className="stat-label" style={{ marginBottom: '1rem' }}>Active HFT Execution</h3>
+                                {signals.length === 0 ? (
+                                    <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-dim)', fontSize: '0.9rem', border: '1px dashed var(--border)', borderRadius: '15px' }}>
+                                        SCANNING MEMPOOL FOR QUANTUM OPPORTUNITIES...
+                                    </div>
+                                ) : (
+                                    signals.slice(0, 3).map(sig => (
+                                        <div key={sig.id} className={`panel signal-card ${sig.dir.toLowerCase()}`}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                <div>
+                                                    <span className={`badge ${sig.dir === 'LONG' ? 'success' : 'danger'}`}>{sig.dir}</span>
+                                                    <h3 style={{ fontSize: '1.6rem', fontWeight: 800 }}>{sig.coin} <span style={{ color: 'var(--text-dim)', fontSize: '1rem' }}>@ {sig.entry}</span></h3>
+                                                </div>
+                                                <div style={{ textAlign: 'right' }}>
+                                                    <div className="mono" style={{ fontSize: '0.8rem', color: sig.status === 'WON' ? 'var(--success)' : sig.status === 'LOST' ? 'var(--danger)' : 'var(--primary)' }}>
+                                                        {sig.status === 'ACTIVE' ? 'EXECUTING...' : `SIGNAL ${sig.status}`}
+                                                    </div>
+                                                    <div style={{ fontSize: '1.2rem', fontWeight: 800 }}>
+                                                        {sig.status === 'WON' ? `+$${sig.tpUsd || '5.00'}` : sig.status === 'LOST' ? `-$${sig.slUsd || '2.50'}` : sig.status === 'BREAKEVEN' ? '$0.00' : `TARGET: +$${sig.tpUsd || '5.00'}`}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '0.75rem', marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                                                <div>
+                                                    <div className="stat-label">Margin</div>
+                                                    <div className="mono" style={{ fontWeight: 800 }}>${sig.margin}</div>
+                                                </div>
+                                                <div>
+                                                    <div className="stat-label">Leverage</div>
+                                                    <div className="mono" style={{ fontWeight: 800 }}>{sig.leverage}</div>
+                                                </div>
+                                                <div>
+                                                    <div className="stat-label">TP / SL</div>
+                                                    <div className="mono" style={{ fontWeight: 800 }}>+$5 / -$2.5</div>
+                                                </div>
+                                                <div>
+                                                    <div className="stat-label">Mode</div>
+                                                    <div className="mono" style={{ fontWeight: 800 }}>{sig.breakevenLocked ? 'BE ON' : 'BE ARM'}</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+                    </main>
+
+                    {/* Right Column: Liquidity */}
+                    <aside className="main-column">
+                        <div className="panel">
+                            <h3 className="stat-label" style={{ marginBottom: '1.2rem' }}>L2 Order Depth (Quantum)</h3>
+                            <div style={{ marginBottom: '1rem' }}>
+                                {orderBook.asks.map((a, i) => (
+                                    <div key={i} className="ob-row">
+                                        <div className="ob-fill" style={{ width: `${(a.t / (orderBook.asks[0]?.t || 1)) * 100}%`, background: 'var(--danger)' }}></div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', position: 'relative', padding: '0 5px' }}>
+                                            <span style={{ color: 'var(--danger)', fontWeight: 800 }}>{a.p.toFixed(2)}</span>
+                                            <span className="mono">{a.s}</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                            <div style={{ textAlign: 'center', padding: '15px 0', borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)', margin: '10px 0' }}>
+                                <div className="stat-value mono">{(orderBook.last || 0).toFixed(2)}</div>
+                                <div style={{ fontSize: '0.6rem', color: 'var(--primary)', letterSpacing: '2px' }}>SPREAD: 0.01%</div>
+                            </div>
+                            <div>
+                                {orderBook.bids.map((b, i) => (
+                                    <div key={i} className="ob-row">
+                                        <div className="ob-fill" style={{ width: `${(b.t / (orderBook.bids[orderBook.bids.length-1]?.t || 1)) * 100}%`, background: 'var(--success)' }}></div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', position: 'relative', padding: '0 5px' }}>
+                                            <span style={{ color: 'var(--success)', fontWeight: 800 }}>{b.p.toFixed(2)}</span>
+                                            <span className="mono">{b.s}</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="panel" style={{ marginTop: '1.5rem' }}>
+                            <h3 className="stat-label" style={{ marginBottom: '1.2rem' }}>Network Performance</h3>
+                            <div style={{ marginBottom: '1rem' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: '5px' }}>
+                                    <span>Global TPS</span>
+                                    <span style={{ color: 'var(--primary)', fontWeight: 800 }}>{stats.tps.toFixed(2)}k/s</span>
+                                </div>
+                                <div style={{ height: '4px', background: 'rgba(255,255,255,0.05)', borderRadius: '2px', overflow: 'hidden' }}>
+                                    <div style={{ height: '100%', background: 'var(--primary)', width: `${Math.min(stats.tps*20, 100)}%`, transition: 'width 0.5s' }}></div>
+                                </div>
+                            </div>
+                            <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)', lineHeight: '1.4' }}>
+                                PROTOCOL: STORM-X v4.0 <br/>
+                                ENCRYPTION: QUANTUM AES-256 <br/>
+                                ROUTING: ULTRA-LOW LATENCY DIRECT
+                            </div>
+                        </div>
+                    </aside>
+                </div>
+            );
+        };
+
+        const container = document.getElementById('root');
+        const root = ReactDOM.createRoot(container);
+        try {
+            const statusEl = document.getElementById('boot-status');
+            const statusBox = document.getElementById('boot-status-container');
+            if (statusEl) statusEl.innerText = 'Quantum Engine Ready. Mounting UI...';
+            root.render(<StormQuant />);
+            setTimeout(() => { if (statusBox) statusBox.style.opacity = '0'; setTimeout(() => { if (statusBox) statusBox.style.display = 'none'; }, 500); }, 800);
+        } catch(e) {
+            console.error("Critical Engine Failure:", e);
+            document.getElementById('boot-status').innerText = 'CRITICAL ERROR: ' + e.message;
+        }
+    </script>
+</body>
+
+</html>
