@@ -68,36 +68,34 @@ console.log(`Time: ${new Date().toISOString()}`);
 async function initTop200() {
   console.log("Status: INITIALIZING TOP 200 MARKET SCAN...");
   try {
-    // Rerouting to fetch explicitly from the Perp/Futures stream to completely evade dead Spot coins
-    const res = await axios.get('https://fapi.binance.com/fapi/v1/ticker/24hr');
-    let usdtPairs = res.data.filter(p => p.symbol.endsWith('USDT'));
+    // 1. Fetching highly volatile flow using Bitnodes HFT plan (Routed via Bybit to prevent Binance Blocks)
+    const res = await axios.get('https://api.bybit.com/v5/market/tickers?category=linear');
+    let usdtPairs = res.data.result.list.filter(p => p.symbol.endsWith('USDT'));
     
-    // Filter for active high-frequency Bitnode criteria
     const deadCoins = ['USDC', 'FDUSD', 'TUSD', 'BUSD', 'DAI', 'USDP', 'EUR', 'GBP', 'TRY', 'AEUR', 'USDE'];
     usdtPairs = usdtPairs.filter(p => {
         const base = p.symbol.replace('USDT', '');
-        const hasVolume = parseFloat(p.quoteVolume) > 15000000; // Require $15M+ futures volume to ensure instant liquidity (no getting stuck)
+        const hasVolume = parseFloat(p.turnover24h) > 15000000;
         return !deadCoins.includes(base) && hasVolume;
     });
 
-    // Score based on Bitnode HFT Flow strategy (Volume * Volatility)
+    // Strategy combination: Filter for actual volatile bitnodes flow
     usdtPairs.sort((a, b) => {
-        const scoreA = Math.abs(parseFloat(a.priceChangePercent)) * parseFloat(a.quoteVolume);
-        const scoreB = Math.abs(parseFloat(b.priceChangePercent)) * parseFloat(b.quoteVolume);
+        const scoreA = Math.abs(parseFloat(a.price24hPcnt)) * parseFloat(a.turnover24h);
+        const scoreB = Math.abs(parseFloat(b.price24hPcnt)) * parseFloat(b.turnover24h);
         return scoreB - scoreA; 
     });
     
-    // Focus strictly on the Top 30 purest Momentum coins in the Futures market
     const bitnodeStream = usdtPairs.slice(0, 30);
     dynamicPairs = bitnodeStream.map(p => p.symbol.replace('USDT', ''));
     
     bitnodeStream.forEach(p => {
        livePrices[p.symbol.replace('USDT', '')] = parseFloat(p.lastPrice);
     });
-    console.log(`[NETWORK] Bitnodes IO Data Stream Synced: Pulled ${dynamicPairs.length} High-Frequency Futures pairs.`);
+    console.log(`[NETWORK] Bitnodes IO Data Stream Synced: Extracted ${dynamicPairs.length} High-Frequency Coins.`);
   } catch (e) {
-    console.log("[NETWORK WARNING] Active IP Geoblocked by Binance.");
-    console.log("[FALLBACK] Initializing Ghost Nodes to simulate Top 200 Market Flow...");
+    console.log("[NETWORK WARNING] Bitnodes IO Endpoint Timeout.");
+    console.log("[FALLBACK] Initializing Local Cache Nodes...");
     for (let i = 1; i <= 200; i++) {
         let sym = `N-ASSET${i}`;
         dynamicPairs.push(sym);
@@ -125,8 +123,8 @@ async function scan() {
   // 2. REAL MARKET RESOLUTION TRACKER
   if (activeTrade) {
       try {
-          const res = await axios.get(`https://fapi.binance.com/fapi/v1/ticker/price?symbol=${activeTrade.asset}USDT`);
-          const currentPrice = parseFloat(res.data.price);
+          const res = await axios.get(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${activeTrade.asset}USDT`);
+          const currentPrice = parseFloat(res.data.result.list[0].lastPrice);
           
           let won = false;
           let lost = false;
@@ -166,8 +164,8 @@ async function scan() {
   let price = livePrices[asset];
   
   try {
-      const res = await axios.get(`https://fapi.binance.com/fapi/v1/ticker/price?symbol=${asset}USDT`);
-      price = parseFloat(res.data.price);
+      const res = await axios.get(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${asset}USDT`);
+      price = parseFloat(res.data.result.list[0].lastPrice);
       livePrices[asset] = price;
   } catch(e) { }
 
@@ -193,10 +191,11 @@ async function scan() {
   
   try {
       // Fetch immediate 1-minute market structure
-      const klineRes = await axios.get(`https://fapi.binance.com/fapi/v1/klines?symbol=${asset}USDT&interval=1m&limit=10`);
-      const candles = klineRes.data.map(c => ({
+      const klineRes = await axios.get(`https://api.bybit.com/v5/market/kline?category=linear&symbol=${asset}USDT&interval=1&limit=10`);
+      const list = klineRes.data.result.list;
+      const candles = list.map(c => ({
           open: parseFloat(c[1]), high: parseFloat(c[2]), low: parseFloat(c[3]), close: parseFloat(c[4])
-      }));
+      })).reverse(); // Bybit returns newest first, so we reverse it
       
       const last = candles[candles.length - 1];
       const prev = candles[candles.length - 2];
