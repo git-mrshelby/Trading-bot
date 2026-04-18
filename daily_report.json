@@ -1,8 +1,8 @@
 {
-  "timestamp": "2026-04-18T12:30:50.433Z",
-  "dailyPnL": -1,
-  "totalPnL": -1,
-  "tradeCount": 30,
+  "timestamp": "2026-04-18T12:41:21.851Z",
+  "dailyPnL": -2,
+  "totalPnL": -2,
+  "tradeCount": 36,
   "trades": [
     {
       "time": "2026-04-18T11:52:32.402Z",
@@ -363,6 +363,78 @@
       "status": "WON",
       "profit": 0.5,
       "closingPrice": 1.4313
+    },
+    {
+      "time": "2026-04-18T12:31:55.680Z",
+      "asset": "DOGE",
+      "dir": "SHORT",
+      "entry": 0.09591,
+      "tp": 0.09581,
+      "sl": 0.09601,
+      "conf": 110,
+      "status": "WON",
+      "profit": 0.5,
+      "closingPrice": 0.09581
+    },
+    {
+      "time": "2026-04-18T12:35:31.148Z",
+      "asset": "TAO",
+      "dir": "LONG",
+      "entry": 249.7,
+      "tp": 249.9,
+      "sl": 249.5,
+      "conf": 110,
+      "status": "WON",
+      "profit": 0.5,
+      "closingPrice": 249.92
+    },
+    {
+      "time": "2026-04-18T12:37:16.430Z",
+      "asset": "ZEC",
+      "dir": "LONG",
+      "entry": 322.61,
+      "tp": 322.93,
+      "sl": 322.29,
+      "conf": 95,
+      "status": "LOST",
+      "profit": -0.5,
+      "closingPrice": 322.22
+    },
+    {
+      "time": "2026-04-18T12:38:31.629Z",
+      "asset": "DOGE",
+      "dir": "LONG",
+      "entry": 0.09576,
+      "tp": 0.09586,
+      "sl": 0.09566,
+      "conf": 120,
+      "status": "LOST",
+      "profit": -0.5,
+      "closingPrice": 0.09566
+    },
+    {
+      "time": "2026-04-18T12:40:26.937Z",
+      "asset": "PIPPIN",
+      "dir": "LONG",
+      "entry": 0.0289,
+      "tp": 0.0289,
+      "sl": 0.0289,
+      "conf": 105,
+      "status": "LOST",
+      "profit": -0.5,
+      "closingPrice": 0.02889
+    },
+    {
+      "time": "2026-04-18T12:41:07.034Z",
+      "asset": "ENJ",
+      "dir": "SHORT",
+      "entry": 0.054972,
+      "tp": 0.054917,
+      "sl": 0.055027,
+      "conf": 115,
+      "status": "LOST",
+      "profit": -0.5,
+      "closingPrice": 0.055053
     }
   ]
 }
