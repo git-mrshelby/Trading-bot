@@ -69,16 +69,27 @@ async function initTop200() {
   console.log("Status: INITIALIZING TOP 200 MARKET SCAN...");
   try {
     const res = await axios.get('https://data-api.binance.vision/api/v3/ticker/24hr');
-    const usdtPairs = res.data.filter(p => p.symbol.endsWith('USDT'));
-    usdtPairs.sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume));
+    let usdtPairs = res.data.filter(p => p.symbol.endsWith('USDT'));
     
-    const top200 = usdtPairs.slice(0, 200);
-    dynamicPairs = top200.map(p => p.symbol.replace('USDT', ''));
+    // Filter out stablecoins, fiat pegs, and dead volume coins
+    const deadCoins = ['USDC', 'FDUSD', 'TUSD', 'BUSD', 'DAI', 'USDP', 'EUR', 'GBP', 'TRY', 'AEUR', 'USDE'];
+    usdtPairs = usdtPairs.filter(p => {
+        const base = p.symbol.replace('USDT', '');
+        const hasVolume = parseFloat(p.quoteVolume) > 2000000; // Requires high institutional liquidity
+        return !deadCoins.includes(base) && hasVolume;
+    });
+
+    // Sort explicitly by HIGH VOLATILITY (highest absolute % price change in 24hr)
+    usdtPairs.sort((a, b) => Math.abs(parseFloat(b.priceChangePercent)) - Math.abs(parseFloat(a.priceChangePercent)));
     
-    top200.forEach(p => {
+    // Focus strictly on the 60 most volatile/high-frequency moving coins today
+    const topVolatileMovers = usdtPairs.slice(0, 60);
+    dynamicPairs = topVolatileMovers.map(p => p.symbol.replace('USDT', ''));
+    
+    topVolatileMovers.forEach(p => {
        livePrices[p.symbol.replace('USDT', '')] = parseFloat(p.lastPrice);
     });
-    console.log(`[NETWORK] Successfully synced Top ${dynamicPairs.length} pairs from Binance.`);
+    console.log(`[NETWORK] Successfully synced Top ${dynamicPairs.length} HIGHLY VOLATILE pairs from Binance.`);
   } catch (e) {
     console.log("[NETWORK WARNING] Active IP Geoblocked by Binance.");
     console.log("[FALLBACK] Initializing Ghost Nodes to simulate Top 200 Market Flow...");
