@@ -155,7 +155,7 @@ async function scan() {
       livePrices[asset] = price;
   } catch(e) { }
 
-  // 4. GODZILLA CONSENSUS ENGINE
+  // 4. GODZILLA CONSENSUS ENGINE & SMART MONEY CONCEPTS (ICT, FVG, OB, LIQUIDITY)
   const currentTps = 1.5 + Math.random() * 3.5;
   if (currentTps < 2.5) return; 
 
@@ -167,8 +167,56 @@ async function scan() {
   if (currentTps > 3.0) score += 25;
   if (isDotsInflow === isOrderBookHeavyBid) score += 40; 
   if ((rWalkForward > price && isDotsInflow) || (rWalkForward < price && !isDotsInflow)) score += 35; 
+
+  // ICT & TECHNICALS (Adding real market data confluence)
+  let fvgActive = false;
+  let orderBlockActive = false;
+  let supportResistanceConfluence = false;
+  let liquiditySweep = false;
+  let smaTrend = false;
   
-  if (score >= 80) { 
+  try {
+      // Fetch immediate 1-minute market structure
+      const klineRes = await axios.get(`https://data-api.binance.vision/api/v3/klines?symbol=${asset}USDT&interval=1m&limit=10`);
+      const candles = klineRes.data.map(c => ({
+          open: parseFloat(c[1]), high: parseFloat(c[2]), low: parseFloat(c[3]), close: parseFloat(c[4])
+      }));
+      
+      const last = candles[candles.length - 1];
+      const prev = candles[candles.length - 2];
+      const prev2 = candles[candles.length - 3];
+      
+      // Fair Value Gap (FVG)
+      fvgActive = Math.abs(prev2.low - last.high) > (price * 0.0002) || Math.abs(prev2.high - last.low) > (price * 0.0002);
+      
+      // Institutional Order Block (OB) - Last aggressive counter candle
+      orderBlockActive = (prev.close < prev.open && last.close > last.open && last.close > prev.high) ||
+                         (prev.close > prev.open && last.close < last.open && last.close < prev.low);
+                         
+      // Support/Resistance & Supply/Demand Zones Confirmed
+      const minLow = Math.min(...candles.map(c => c.low));
+      const maxHigh = Math.max(...candles.map(c => c.high));
+      supportResistanceConfluence = (price - minLow) / price < 0.0015 || (maxHigh - price) / price < 0.0015;
+
+      // Smart Money Liquidity Sweeps
+      liquiditySweep = (last.low < Math.min(...candles.slice(0, 8).map(c => c.low)) && last.close > prev.low) || 
+                       (last.high > Math.max(...candles.slice(0, 8).map(c => c.high)) && last.close < prev.high);
+
+      // Technical Trendline & EMA Alignment
+      const avg = candles.reduce((sum, c) => sum + c.close, 0) / candles.length;
+      smaTrend = isOrderBookHeavyBid ? price > avg : price < avg;
+
+  } catch (e) {}
+
+  // Aggregate into Godzilla's existing confidence metric
+  if (fvgActive) score += 5;
+  if (orderBlockActive) score += 10;
+  if (supportResistanceConfluence) score += 5;
+  if (liquiditySweep) score += 10;
+  if (smaTrend) score += 5;
+
+  // Demand higher accuracy entry (Threshold bumped up to 95 for maximum confluence)
+  if (score >= 95) { 
     const dir = isOrderBookHeavyBid ? 'LONG' : 'SHORT';
     const tpMove = price * 0.001;  // 0.1% price move for $0.5
     const slMove = price * 0.001; // Strict 0.1% price check for $0.5 cutoff
