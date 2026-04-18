@@ -124,7 +124,7 @@ async function scan() {
           }
 
           if (won || lost) {
-             const profit = won ? 5.00 : -2.00; 
+             const profit = won ? 0.50 : -2.00; 
              dailyPnL += profit;
              totalPnL += profit;
              
@@ -170,7 +170,7 @@ async function scan() {
   
   if (score >= 80) { 
     const dir = isOrderBookHeavyBid ? 'LONG' : 'SHORT';
-    const tpMove = price * 0.01;  // 1% price move for $5
+    const tpMove = price * 0.001;  // 0.1% price move for $0.5
     const slMove = price * 0.004; // Strict 0.4% price check for $2 cutoff
     const decimals = price.toString().split('.')[1]?.length || 4;
     
@@ -179,7 +179,7 @@ async function scan() {
 
     console.log(`\n> [GODZILLA LEAD] ${asset} at $${price.toFixed(4)} | CONFIDENCE: ${score}% | DIR: ${dir}`);
     console.log(`  |- Real TP: $${tp.toFixed(4)} | Real SL: $${sl.toFixed(4)} (Max -$2 Limit)`);
-    console.log(`  |- Target: $5 Profit | 50x Leverage Engaged...`);
+    console.log(`  |- Target: $0.5 Profit | 50x Leverage Engaged...`);
     
     activeTrade = {
         time: new Date().toISOString(),
