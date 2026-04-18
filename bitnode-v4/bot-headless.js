@@ -68,28 +68,33 @@ console.log(`Time: ${new Date().toISOString()}`);
 async function initTop200() {
   console.log("Status: INITIALIZING TOP 200 MARKET SCAN...");
   try {
-    const res = await axios.get('https://data-api.binance.vision/api/v3/ticker/24hr');
+    // Rerouting to fetch explicitly from the Perp/Futures stream to completely evade dead Spot coins
+    const res = await axios.get('https://fapi.binance.com/fapi/v1/ticker/24hr');
     let usdtPairs = res.data.filter(p => p.symbol.endsWith('USDT'));
     
-    // Filter out stablecoins, fiat pegs, and dead volume coins
+    // Filter for active high-frequency Bitnode criteria
     const deadCoins = ['USDC', 'FDUSD', 'TUSD', 'BUSD', 'DAI', 'USDP', 'EUR', 'GBP', 'TRY', 'AEUR', 'USDE'];
     usdtPairs = usdtPairs.filter(p => {
         const base = p.symbol.replace('USDT', '');
-        const hasVolume = parseFloat(p.quoteVolume) > 2000000; // Requires high institutional liquidity
+        const hasVolume = parseFloat(p.quoteVolume) > 15000000; // Require $15M+ futures volume to ensure instant liquidity (no getting stuck)
         return !deadCoins.includes(base) && hasVolume;
     });
 
-    // Sort explicitly by HIGH VOLATILITY (highest absolute % price change in 24hr)
-    usdtPairs.sort((a, b) => Math.abs(parseFloat(b.priceChangePercent)) - Math.abs(parseFloat(a.priceChangePercent)));
+    // Score based on Bitnode HFT Flow strategy (Volume * Volatility)
+    usdtPairs.sort((a, b) => {
+        const scoreA = Math.abs(parseFloat(a.priceChangePercent)) * parseFloat(a.quoteVolume);
+        const scoreB = Math.abs(parseFloat(b.priceChangePercent)) * parseFloat(b.quoteVolume);
+        return scoreB - scoreA; 
+    });
     
-    // Focus strictly on the 60 most volatile/high-frequency moving coins today
-    const topVolatileMovers = usdtPairs.slice(0, 60);
-    dynamicPairs = topVolatileMovers.map(p => p.symbol.replace('USDT', ''));
+    // Focus strictly on the Top 30 purest Momentum coins in the Futures market
+    const bitnodeStream = usdtPairs.slice(0, 30);
+    dynamicPairs = bitnodeStream.map(p => p.symbol.replace('USDT', ''));
     
-    topVolatileMovers.forEach(p => {
+    bitnodeStream.forEach(p => {
        livePrices[p.symbol.replace('USDT', '')] = parseFloat(p.lastPrice);
     });
-    console.log(`[NETWORK] Successfully synced Top ${dynamicPairs.length} HIGHLY VOLATILE pairs from Binance.`);
+    console.log(`[NETWORK] Bitnodes IO Data Stream Synced: Pulled ${dynamicPairs.length} High-Frequency Futures pairs.`);
   } catch (e) {
     console.log("[NETWORK WARNING] Active IP Geoblocked by Binance.");
     console.log("[FALLBACK] Initializing Ghost Nodes to simulate Top 200 Market Flow...");
@@ -120,7 +125,7 @@ async function scan() {
   // 2. REAL MARKET RESOLUTION TRACKER
   if (activeTrade) {
       try {
-          const res = await axios.get(`https://data-api.binance.vision/api/v3/ticker/price?symbol=${activeTrade.asset}USDT`);
+          const res = await axios.get(`https://fapi.binance.com/fapi/v1/ticker/price?symbol=${activeTrade.asset}USDT`);
           const currentPrice = parseFloat(res.data.price);
           
           let won = false;
@@ -161,7 +166,7 @@ async function scan() {
   let price = livePrices[asset];
   
   try {
-      const res = await axios.get(`https://data-api.binance.vision/api/v3/ticker/price?symbol=${asset}USDT`);
+      const res = await axios.get(`https://fapi.binance.com/fapi/v1/ticker/price?symbol=${asset}USDT`);
       price = parseFloat(res.data.price);
       livePrices[asset] = price;
   } catch(e) { }
@@ -188,7 +193,7 @@ async function scan() {
   
   try {
       // Fetch immediate 1-minute market structure
-      const klineRes = await axios.get(`https://data-api.binance.vision/api/v3/klines?symbol=${asset}USDT&interval=1m&limit=10`);
+      const klineRes = await axios.get(`https://fapi.binance.com/fapi/v1/klines?symbol=${asset}USDT&interval=1m&limit=10`);
       const candles = klineRes.data.map(c => ({
           open: parseFloat(c[1]), high: parseFloat(c[2]), low: parseFloat(c[3]), close: parseFloat(c[4])
       }));
