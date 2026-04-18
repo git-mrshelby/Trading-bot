@@ -67,40 +67,52 @@ console.log(`Time: ${new Date().toISOString()}`);
 
 async function initTop200() {
   console.log("Status: INITIALIZING TOP 200 MARKET SCAN...");
-  try {
-    // 1. Fetching highly volatile flow using Bitnodes HFT plan (Routed via Bybit to prevent Binance Blocks)
-    const res = await axios.get('https://api.bybit.com/v5/market/tickers?category=linear');
-    let usdtPairs = res.data.result.list.filter(p => p.symbol.endsWith('USDT'));
-    
-    const deadCoins = ['USDC', 'FDUSD', 'TUSD', 'BUSD', 'DAI', 'USDP', 'EUR', 'GBP', 'TRY', 'AEUR', 'USDE'];
-    usdtPairs = usdtPairs.filter(p => {
-        const base = p.symbol.replace('USDT', '');
-        const hasVolume = parseFloat(p.turnover24h) > 15000000;
-        return !deadCoins.includes(base) && hasVolume;
-    });
+  
+  let retries = 5;
+  while (retries > 0) {
+    try {
+      // 1. Fetching highly volatile flow using Bitnodes HFT plan (Routed via Bybit to prevent Binance Blocks)
+      const res = await axios.get('https://api.bybit.com/v5/market/tickers?category=linear');
+      let usdtPairs = res.data.result.list.filter(p => p.symbol.endsWith('USDT'));
+      
+      const deadCoins = ['USDC', 'FDUSD', 'TUSD', 'BUSD', 'DAI', 'USDP', 'EUR', 'GBP', 'TRY', 'AEUR', 'USDE'];
+      usdtPairs = usdtPairs.filter(p => {
+          const base = p.symbol.replace('USDT', '');
+          const hasVolume = parseFloat(p.turnover24h) > 15000000;
+          return !deadCoins.includes(base) && hasVolume;
+      });
 
-    // Strategy combination: Filter for actual volatile bitnodes flow
-    usdtPairs.sort((a, b) => {
-        const scoreA = Math.abs(parseFloat(a.price24hPcnt)) * parseFloat(a.turnover24h);
-        const scoreB = Math.abs(parseFloat(b.price24hPcnt)) * parseFloat(b.turnover24h);
-        return scoreB - scoreA; 
-    });
-    
-    const bitnodeStream = usdtPairs.slice(0, 30);
-    dynamicPairs = bitnodeStream.map(p => p.symbol.replace('USDT', ''));
-    
-    bitnodeStream.forEach(p => {
-       livePrices[p.symbol.replace('USDT', '')] = parseFloat(p.lastPrice);
-    });
-    console.log(`[NETWORK] Bitnodes IO Data Stream Synced: Extracted ${dynamicPairs.length} High-Frequency Coins.`);
-  } catch (e) {
-    console.log("[NETWORK WARNING] Bitnodes IO Endpoint Timeout.");
-    console.log("[FALLBACK] Initializing Local Cache Nodes...");
-    for (let i = 1; i <= 200; i++) {
-        let sym = `N-ASSET${i}`;
-        dynamicPairs.push(sym);
-        livePrices[sym] = 50 + (Math.random() * 100);
+      // Strategy combination: Filter for actual volatile bitnodes flow
+      usdtPairs.sort((a, b) => {
+          const scoreA = Math.abs(parseFloat(a.price24hPcnt)) * parseFloat(a.turnover24h);
+          const scoreB = Math.abs(parseFloat(b.price24hPcnt)) * parseFloat(b.turnover24h);
+          return scoreB - scoreA; 
+      });
+      
+      const bitnodeStream = usdtPairs.slice(0, 30);
+      dynamicPairs = bitnodeStream.map(p => p.symbol.replace('USDT', ''));
+      
+      bitnodeStream.forEach(p => {
+         livePrices[p.symbol.replace('USDT', '')] = parseFloat(p.lastPrice);
+      });
+      console.log(`[NETWORK] Bitnodes IO Data Stream Synced: Extracted ${dynamicPairs.length} High-Frequency Coins.`);
+      return; // Break out of retry loop on success
+    } catch (e) {
+      retries--;
+      console.log(`[NETWORK RETRY] Bitnodes IO Sync failed (${e.message}). Retries left: ${retries}`);
+      if (retries > 0) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+      }
     }
+  }
+
+  // Fallback only if all retries fail
+  console.log("[NETWORK CRITICAL] Bitnodes IO Endpoint Timeout after 5 retries.");
+  console.log("[FALLBACK] Initializing Local Cache Nodes...");
+  for (let i = 1; i <= 200; i++) {
+      let sym = `N-ASSET${i}`;
+      dynamicPairs.push(sym);
+      livePrices[sym] = 50 + (Math.random() * 100);
   }
 }
 
