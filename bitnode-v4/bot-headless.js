@@ -66,54 +66,48 @@ console.log("--- GODZILLA HFT HEADLESS ENGINE STARTED ---");
 console.log(`Time: ${new Date().toISOString()}`);
 
 async function initTop200() {
-  console.log("Status: INITIALIZING TOP 200 MARKET SCAN...");
+  console.log("Status: INITIALIZING TOP MARKET SCAN VIA BINANCE...");
   
   let retries = 5;
   while (retries > 0) {
     try {
-      // 1. Fetching highly volatile flow using Bitnodes HFT plan (Routed via Bybit to prevent Binance Blocks)
-      const res = await axios.get('https://bitnodes.io/api/v1/snapshots/latest/');
-      let usdtPairs = Object.keys(res.data.nodes || {}).slice(0, 30).map(ip => ({ symbol: 'NODE-' + ip.replace(/[^a-zA-Z0-9]/g, '').substring(0, 5) + 'USDT', turnover24h: '20000000', price24hPcnt: '10', lastPrice: String(50 + Math.random() * 100) }));
+      // 1. Fetching highly volatile flow using Binance API
+      const res = await axios.get('https://api.binance.com/api/v3/ticker/24hr');
+      let usdtPairs = res.data.filter(p => p.symbol.endsWith('USDT'));
       
       const deadCoins = ['USDC', 'FDUSD', 'TUSD', 'BUSD', 'DAI', 'USDP', 'EUR', 'GBP', 'TRY', 'AEUR', 'USDE'];
       usdtPairs = usdtPairs.filter(p => {
           const base = p.symbol.replace('USDT', '');
-          const hasVolume = parseFloat(p.turnover24h) > 15000000;
+          const hasVolume = parseFloat(p.quoteVolume) > 15000000;
           return !deadCoins.includes(base) && hasVolume;
       });
 
-      // Strategy combination: Filter for actual volatile bitnodes flow
+      // Filter for most active/volatile
       usdtPairs.sort((a, b) => {
-          const scoreA = Math.abs(parseFloat(a.price24hPcnt)) * parseFloat(a.turnover24h);
-          const scoreB = Math.abs(parseFloat(b.price24hPcnt)) * parseFloat(b.turnover24h);
+          const scoreA = Math.abs(parseFloat(a.priceChangePercent)) * parseFloat(a.quoteVolume);
+          const scoreB = Math.abs(parseFloat(b.priceChangePercent)) * parseFloat(b.quoteVolume);
           return scoreB - scoreA; 
       });
       
-      const bitnodeStream = usdtPairs.slice(0, 30);
-      dynamicPairs = bitnodeStream.map(p => p.symbol.replace('USDT', ''));
+      const topStream = usdtPairs.slice(0, 30);
+      dynamicPairs = topStream.map(p => p.symbol);
       
-      bitnodeStream.forEach(p => {
-         livePrices[p.symbol.replace('USDT', '')] = parseFloat(p.lastPrice);
+      topStream.forEach(p => {
+         livePrices[p.symbol] = parseFloat(p.lastPrice);
       });
-      console.log(`[NETWORK] Bitnodes IO Data Stream Synced: Extracted ${dynamicPairs.length} High-Frequency Coins.`);
+      
+      console.log(`[NETWORK] Live Binance Data Stream Synced: Extracted ${dynamicPairs.length} High-Frequency Coins.`);
       return; // Break out of retry loop on success
     } catch (e) {
       retries--;
-      console.log(`[NETWORK RETRY] Bitnodes IO Sync failed (${e.message}). Retries left: ${retries}`);
-      if (retries > 0) {
-          await new Promise(resolve => setTimeout(resolve, 2000));
-      }
+      console.log(`[NETWORK RETRY] Binance Sync failed (${e.message}). Retries left: ${retries}`);
+      if (retries > 0) await new Promise(resolve => setTimeout(resolve, 2000));
     }
   }
 
-  // Fallback only if all retries fail
-  console.log("[NETWORK CRITICAL] Bitnodes IO Endpoint Timeout after 5 retries.");
-  console.log("[FALLBACK] Initializing Local Cache Nodes...");
-  for (let i = 1; i <= 200; i++) {
-      let sym = `N-ASSET${i}`;
-      dynamicPairs.push(sym);
-      livePrices[sym] = 50 + (Math.random() * 100);
-  }
+  // Fallback
+  console.log("[NETWORK CRITICAL] Binance API Endpoint Timeout after 5 retries.");
+  process.exit(1);
 }
 
 async function scan() {
@@ -132,11 +126,22 @@ async function scan() {
     return;
   }
 
+  try {
+      const priceRes = await axios.get('https://api.binance.com/api/v3/ticker/price');
+      priceRes.data.forEach(t => {
+          if (livePrices[t.symbol] !== undefined || dynamicPairs.includes(t.symbol) || activeTrade?.asset === t.symbol) {
+              livePrices[t.symbol] = parseFloat(t.price);
+          }
+      });
+  } catch (e) {
+      console.log("Failed to fetch live prices", e.message);
+      return;
+  }
+
   // 2. REAL MARKET RESOLUTION TRACKER
   if (activeTrade) {
       try {
-
-          const currentPrice = randomWalk(livePrices[activeTrade.asset] || activeTrade.entry, 0.0001, 0.02); livePrices[activeTrade.asset] = currentPrice;
+          const currentPrice = livePrices[activeTrade.asset];
           
           let won = false;
           let lost = false;
@@ -174,25 +179,10 @@ async function scan() {
   // 3. SCAN THE MARKET FOR NEW LEADS
   const asset = dynamicPairs[Math.floor(Math.random() * dynamicPairs.length)];
   let price = livePrices[asset];
+  if (!price) return;
   
-  try {
-
-      price = randomWalk(price, 0.0001, 0.02); livePrices[asset] = price;
-      livePrices[asset] = price;
-  } catch(e) { }
-
   // 4. GODZILLA CONSENSUS ENGINE & SMART MONEY CONCEPTS (ICT, FVG, OB, LIQUIDITY)
-  const currentTps = 1.5 + Math.random() * 3.5;
-  if (currentTps < 2.5) return; 
-
-  const rWalkForward = randomWalk(price, 0.0001, 0.02);
-  const isDotsInflow = Math.random() > 0.4;
-  const isOrderBookHeavyBid = Math.random() > 0.5;
-  
-  let score = 0;
-  if (currentTps > 3.0) score += 25;
-  if (isDotsInflow === isOrderBookHeavyBid) score += 40; 
-  if ((rWalkForward > price && isDotsInflow) || (rWalkForward < price && !isDotsInflow)) score += 35; 
+  let score = 50; 
 
   // ICT & TECHNICALS (Adding real market data confluence)
   let fvgActive = false;
@@ -200,21 +190,26 @@ async function scan() {
   let supportResistanceConfluence = false;
   let liquiditySweep = false;
   let smaTrend = false;
+  let isOrderBookHeavyBid = Math.random() > 0.5; // Default guess
   
   try {
       // Fetch immediate 1-minute market structure
-
-      const list = klineRes.data.result.list;
-      const candles = list.map(c => ({
-          open: parseFloat(c[1]), high: parseFloat(c[2]), low: parseFloat(c[3]), close: parseFloat(c[4])
-      })).reverse(); // Bybit returns newest first, so we reverse it
+      const klineRes = await axios.get(`https://api.binance.com/api/v3/klines?symbol=${asset}&interval=1m&limit=20`);
       
-      const last = candles[candles.length - 1];
-      const prev = candles[candles.length - 2];
-      const prev2 = candles[candles.length - 3];
+      const candles = klineRes.data.map(c => ({
+          open: parseFloat(c[1]), high: parseFloat(c[2]), low: parseFloat(c[3]), close: parseFloat(c[4])
+      })); // Binance is oldest first, index length-1 is current/latest open candle.
+      
+      if (candles.length < 10) return;
+
+      const last = candles[candles.length - 2];    // previous closed candle
+      const prev = candles[candles.length - 3];   // candle before that
+      const prev2 = candles[candles.length - 4];  // and before that
+      
+      const currentClosed = last.close;
       
       // Fair Value Gap (FVG)
-      fvgActive = Math.abs(prev2.low - last.high) > (price * 0.0002) || Math.abs(prev2.high - last.low) > (price * 0.0002);
+      fvgActive = Math.abs(prev2.low - last.high) > (currentClosed * 0.0002) || Math.abs(prev2.high - last.low) > (currentClosed * 0.0002);
       
       // Institutional Order Block (OB) - Last aggressive counter candle
       orderBlockActive = (prev.close < prev.open && last.close > last.open && last.close > prev.high) ||
@@ -223,37 +218,40 @@ async function scan() {
       // Support/Resistance & Supply/Demand Zones Confirmed
       const minLow = Math.min(...candles.map(c => c.low));
       const maxHigh = Math.max(...candles.map(c => c.high));
-      supportResistanceConfluence = (price - minLow) / price < 0.0015 || (maxHigh - price) / price < 0.0015;
+      supportResistanceConfluence = (currentClosed - minLow) / currentClosed < 0.0015 || (maxHigh - currentClosed) / currentClosed < 0.0015;
 
       // Smart Money Liquidity Sweeps
-      liquiditySweep = (last.low < Math.min(...candles.slice(0, 8).map(c => c.low)) && last.close > prev.low) || 
-                       (last.high > Math.max(...candles.slice(0, 8).map(c => c.high)) && last.close < prev.high);
+      liquiditySweep = (last.low < Math.min(...candles.slice(0, 10).map(c => c.low)) && last.close > prev.low) || 
+                       (last.high > Math.max(...candles.slice(0, 10).map(c => c.high)) && last.close < prev.high);
 
       // Technical Trendline & EMA Alignment
       const avg = candles.reduce((sum, c) => sum + c.close, 0) / candles.length;
-      smaTrend = isOrderBookHeavyBid ? price > avg : price < avg;
+      isOrderBookHeavyBid = price > avg; // Define direction based on trend
+      smaTrend = true;
 
-  } catch (e) {}
+  } catch (e) {
+      return; // Skip if we fail dropping indicators
+  }
 
   // Aggregate into Godzilla's existing confidence metric
-  if (fvgActive) score += 5;
+  if (fvgActive) score += 10;
   if (orderBlockActive) score += 10;
-  if (supportResistanceConfluence) score += 5;
+  if (supportResistanceConfluence) score += 15;
   if (liquiditySweep) score += 10;
   if (smaTrend) score += 5;
 
   // Demand higher accuracy entry (Threshold bumped up to 95 for maximum confluence)
   if (score >= 95) { 
     const dir = isOrderBookHeavyBid ? 'LONG' : 'SHORT';
-    const tpMove = price * 0.001;  // 0.1% price move for $0.5
-    const slMove = price * 0.001; // Strict 0.1% price check for $0.5 cutoff
+    const tpMove = price * 0.0015;  // 0.15% price move to achieve profit
+    const slMove = price * 0.0010; // Tighter 0.10% price check for Stop Loss
     const decimals = price.toString().split('.')[1]?.length || 4;
     
     const tp = parseFloat((dir === 'LONG' ? price + tpMove : price - tpMove).toFixed(decimals));
     const sl = parseFloat((dir === 'LONG' ? price - slMove : price + slMove).toFixed(decimals));
 
-    console.log(`\n> [GODZILLA LEAD] ${asset} at $${price.toFixed(4)} | CONFIDENCE: ${score}% | DIR: ${dir}`);
-    console.log(`  |- Real TP: $${tp.toFixed(4)} | Real SL: $${sl.toFixed(4)} (Max -$0.5 Limit)`);
+    console.log(`\n> [GODZILLA LEAD] ${asset} at $${price.toFixed(decimals)} | CONFIDENCE: ${score}% | DIR: ${dir}`);
+    console.log(`  |- Real TP: $${tp.toFixed(decimals)} | Real SL: $${sl.toFixed(decimals)} (Max -$0.5 Limit)`);
     console.log(`  |- Target: $0.5 Profit | 50x Leverage Engaged...`);
     
     activeTrade = {
