@@ -66,26 +66,26 @@ console.log("--- GODZILLA HFT HEADLESS ENGINE STARTED ---");
 console.log(`Time: ${new Date().toISOString()}`);
 
 async function initTop200() {
-  console.log("Status: INITIALIZING TOP MARKET SCAN VIA BYBIT...");
+  console.log("Status: INITIALIZING TOP MARKET SCAN VIA KUCOIN...");
   
   let retries = 5;
   while (retries > 0) {
     try {
-      // 1. Fetching highly volatile flow using Bybit API (bypasses region blocks)
-      const res = await axios.get('https://api.bybit.com/v5/market/tickers?category=linear');
-      let usdtPairs = res.data.result.list.filter(p => p.symbol.endsWith('USDT'));
+      // 1. Fetching highly volatile flow using KuCoin API (Usually avoids geo-blocks)
+      const res = await axios.get('https://api.kucoin.com/api/v1/market/allTickers');
+      let usdtPairs = res.data.data.ticker.filter(p => p.symbol.endsWith('-USDT'));
       
       const deadCoins = ['USDC', 'FDUSD', 'TUSD', 'BUSD', 'DAI', 'USDP', 'EUR', 'GBP', 'TRY', 'AEUR', 'USDE'];
       usdtPairs = usdtPairs.filter(p => {
-          const base = p.symbol.replace('USDT', '');
-          const hasVolume = parseFloat(p.turnover24h) > 15000000;
+          const base = p.symbol.replace('-USDT', '');
+          const hasVolume = parseFloat(p.volValue) > 5000000; // $5M min volume
           return !deadCoins.includes(base) && hasVolume;
       });
 
       // Filter for most active/volatile
       usdtPairs.sort((a, b) => {
-          const scoreA = Math.abs(parseFloat(a.price24hPcnt)) * parseFloat(a.turnover24h);
-          const scoreB = Math.abs(parseFloat(b.price24hPcnt)) * parseFloat(b.turnover24h);
+          const scoreA = Math.abs(parseFloat(a.changeRate || 0)) * parseFloat(a.volValue || 0);
+          const scoreB = Math.abs(parseFloat(b.changeRate || 0)) * parseFloat(b.volValue || 0);
           return scoreB - scoreA; 
       });
       
@@ -93,20 +93,20 @@ async function initTop200() {
       dynamicPairs = topStream.map(p => p.symbol);
       
       topStream.forEach(p => {
-         livePrices[p.symbol] = parseFloat(p.lastPrice);
+         livePrices[p.symbol] = parseFloat(p.last);
       });
       
-      console.log(`[NETWORK] Live Bybit Data Stream Synced: Extracted ${dynamicPairs.length} High-Frequency Coins.`);
+      console.log(`[NETWORK] Live KuCoin Data Stream Synced: Extracted ${dynamicPairs.length} High-Frequency Coins.`);
       return; // Break out of retry loop on success
     } catch (e) {
       retries--;
-      console.log(`[NETWORK RETRY] Bybit Sync failed (${e.message}). Retries left: ${retries}`);
+      console.log(`[NETWORK RETRY] KuCoin Sync failed (${e.message}). Retries left: ${retries}`);
       if (retries > 0) await new Promise(resolve => setTimeout(resolve, 2000));
     }
   }
 
   // Fallback
-  console.log("[NETWORK CRITICAL] Bybit API Endpoint Timeout after 5 retries.");
+  console.log("[NETWORK CRITICAL] KuCoin API Endpoint Timeout after 5 retries.");
   process.exit(1);
 }
 
@@ -127,10 +127,10 @@ async function scan() {
   }
 
   try {
-      const priceRes = await axios.get('https://api.bybit.com/v5/market/tickers?category=linear');
-      priceRes.data.result.list.forEach(t => {
+      const priceRes = await axios.get('https://api.kucoin.com/api/v1/market/allTickers');
+      priceRes.data.data.ticker.forEach(t => {
           if (livePrices[t.symbol] !== undefined || dynamicPairs.includes(t.symbol) || activeTrade?.asset === t.symbol) {
-              livePrices[t.symbol] = parseFloat(t.lastPrice);
+              livePrices[t.symbol] = parseFloat(t.last);
           }
       });
   } catch (e) {
@@ -193,14 +193,14 @@ async function scan() {
   let isOrderBookHeavyBid = Math.random() > 0.5; // Default guess
   
   try {
-      // Fetch immediate 1-minute market structure via Bybit
-      const klineRes = await axios.get(`https://api.bybit.com/v5/market/kline?category=linear&symbol=${asset}&interval=1&limit=20`);
+      // Fetch immediate 1-minute market structure via KuCoin
+      const klineRes = await axios.get(`https://api.kucoin.com/api/v1/market/candles?type=1min&symbol=${asset}`);
       
-      let candles = klineRes.data.result.list.map(c => ({
-          open: parseFloat(c[1]), high: parseFloat(c[2]), low: parseFloat(c[3]), close: parseFloat(c[4])
+      let candles = klineRes.data.data.map(c => ({
+          open: parseFloat(c[1]), close: parseFloat(c[2]), high: parseFloat(c[3]), low: parseFloat(c[4])
       })); 
       
-      // Bybit returns newest first, so we reverse it to match logic
+      // KuCoin returns newest first, so we reverse it to match logic
       candles = candles.reverse();
       
       if (candles.length < 10) return;
