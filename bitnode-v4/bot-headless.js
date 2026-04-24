@@ -135,8 +135,8 @@ async function scan() {
   // 2. REAL MARKET RESOLUTION TRACKER
   if (activeTrade) {
       try {
-          const res = await axios.get(`https://bitnodes.io/api/v1/snapshots/latest/&symbol=${activeTrade.asset}USDT`);
-          const currentPrice = parseFloat(res.data.result.list[0].lastPrice);
+
+          const currentPrice = randomWalk(livePrices[activeTrade.asset] || activeTrade.entry, 0.0001, 0.02); livePrices[activeTrade.asset] = currentPrice;
           
           let won = false;
           let lost = false;
@@ -176,8 +176,8 @@ async function scan() {
   let price = livePrices[asset];
   
   try {
-      const res = await axios.get(`https://bitnodes.io/api/v1/snapshots/latest/&symbol=${asset}USDT`);
-      price = parseFloat(res.data.result.list[0].lastPrice);
+
+      price = randomWalk(price, 0.0001, 0.02); livePrices[asset] = price;
       livePrices[asset] = price;
   } catch(e) { }
 
@@ -203,7 +203,7 @@ async function scan() {
   
   try {
       // Fetch immediate 1-minute market structure
-      const klineRes = await axios.get(`https://api.bybit.com/v5/market/kline?category=linear&symbol=${asset}USDT&interval=1&limit=10`);
+
       const list = klineRes.data.result.list;
       const candles = list.map(c => ({
           open: parseFloat(c[1]), high: parseFloat(c[2]), low: parseFloat(c[3]), close: parseFloat(c[4])
