@@ -243,8 +243,14 @@ async function scan() {
   if (liquiditySweep) score += 10;
   if (smaTrend) score += 5;
 
-  // Demand higher accuracy entry (Threshold bumped up to 95 for maximum confluence)
-  if (score >= 95) { 
+  let now = new Date().getTime();
+  if (!global.lastScanLog || now - global.lastScanLog > 60000) {
+      console.log(`[SCANNER] Still actively scanning ${dynamicPairs.length} coins... Last checked ${asset} (Score: ${score})`);
+      global.lastScanLog = now;
+  }
+
+  // Demand higher accuracy entry (Lowered threshold for more frequent trading, originally 95)
+  if (score >= 75) { 
     const dir = isOrderBookHeavyBid ? 'LONG' : 'SHORT';
     const tpMove = price * 0.0015;  // 0.15% price move to achieve profit
     const slMove = price * 0.0010; // Tighter 0.10% price check for Stop Loss
