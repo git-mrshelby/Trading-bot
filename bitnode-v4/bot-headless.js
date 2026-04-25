@@ -140,8 +140,11 @@ async function scan() {
 
   // 2. REAL MARKET RESOLUTION TRACKER
   if (activeTrade) {
+      const decimals = activeTrade.entry.toString().split('.')[1]?.length || 4;
       try {
-          const currentPrice = livePrices[activeTrade.asset];
+          // Force live prices to fetch for tracking accuracy
+          const priceRes = await axios.get(`https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${activeTrade.asset}`);
+          const currentPrice = parseFloat(priceRes.data.data.price);
           
           let won = false;
           let lost = false;
@@ -170,7 +173,7 @@ async function scan() {
              // Generate report on every trade completion just to be safe
              generateReports();
           } else {
-             console.log(`[TRACKING] ${activeTrade.asset} ${activeTrade.dir} | Entry: $${activeTrade.entry.toFixed(4)} | Live: $${currentPrice.toFixed(4)}... Waiting for Target`);
+             console.log(`[TRACKING] ${activeTrade.asset} ${activeTrade.dir} | Entry: $${activeTrade.entry.toFixed(decimals)} | Live: $${currentPrice.toFixed(decimals)}... Waiting for Target`);
           }
       } catch (e) {}
       return; 
