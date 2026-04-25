@@ -9,10 +9,37 @@ let trades = [];
 let dynamicPairs = [];
 let livePrices = {};
 let activeTrade = null;
+let lastEntryMinute = null;
 
 function randomWalk(price, drift, vol) {
   const shock = (Math.random() + Math.random() + Math.random() + Math.random() - 2) * 1.5;
   return price * Math.exp((drift - 0.5 * Math.pow(vol, 2)) + vol * shock);
+}
+
+function calculateRSI(closes, period = 14) {
+    if (!Array.isArray(closes) || closes.length <= period) return 50;
+
+    let gains = 0;
+    let losses = 0;
+
+    for (let i = 1; i <= period; i++) {
+        const change = closes[i] - closes[i - 1];
+        if (change >= 0) gains += change;
+        else losses -= change;
+    }
+
+    let avgGain = gains / period;
+    let avgLoss = losses / period;
+
+    for (let i = period + 1; i < closes.length; i++) {
+        const change = closes[i] - closes[i - 1];
+        avgGain = ((avgGain * (period - 1)) + Math.max(change, 0)) / period;
+        avgLoss = ((avgLoss * (period - 1)) + Math.max(-change, 0)) / period;
+    }
+
+    if (avgLoss === 0) return 100;
+    const rs = avgGain / avgLoss;
+    return 100 - (100 / (1 + rs));
 }
 
 function generateReports() {
@@ -207,13 +234,17 @@ async function scan() {
   let supportResistanceConfluence = false;
   let liquiditySweep = false;
   let smaTrend = false;
+    let candleConfirmation = false;
+    let momentumAligned = false;
   let isOrderBookHeavyBid = Math.random() > 0.5; // Default guess
+  let candles = [];
+  let rsi = 50;
   
   try {
       // Fetch immediate 1-minute market structure via KuCoin
       const klineRes = await axios.get(`https://api.kucoin.com/api/v1/market/candles?type=1min&symbol=${asset}`);
       
-      let candles = klineRes.data.data.map(c => ({
+      candles = klineRes.data.data.map(c => ({
           open: parseFloat(c[1]), close: parseFloat(c[2]), high: parseFloat(c[3]), low: parseFloat(c[4])
       })); 
       
@@ -227,6 +258,12 @@ async function scan() {
       const prev2 = candles[candles.length - 4];  // and before that
       
       const currentClosed = last.close;
+    const bodySize = Math.abs(last.close - last.open);
+    const candleRange = Math.max(last.high - last.low, 0.0000001);
+    const bullishCandle = last.close > last.open && bodySize / candleRange >= 0.45;
+    const bearishCandle = last.close < last.open && bodySize / candleRange >= 0.45;
+    const bullishEngulfing = last.close > prev.open && last.open < prev.close && last.close > last.open;
+    const bearishEngulfing = last.close < prev.open && last.open > prev.close && last.close < last.open;
       
       // Fair Value Gap (FVG)
       fvgActive = Math.abs(prev2.low - last.high) > (currentClosed * 0.0002) || Math.abs(prev2.high - last.low) > (currentClosed * 0.0002);
@@ -250,6 +287,9 @@ async function scan() {
       const avg = recent50.reduce((sum, c) => sum + c.close, 0) / recent50.length;
       isOrderBookHeavyBid = price > avg; // Define direction based on trend
       smaTrend = true;
+      rsi = calculateRSI(candles.map(c => c.close), 14);
+      momentumAligned = (last.close > prev.close && prev.close > prev2.close) || (last.close < prev.close && prev.close < prev2.close);
+      candleConfirmation = bullishCandle || bearishCandle || bullishEngulfing || bearishEngulfing;
 
   } catch (e) {
       return; // Skip if we fail dropping indicators
@@ -261,33 +301,64 @@ async function scan() {
   if (supportResistanceConfluence) score += 15;
   if (liquiditySweep) score += 10;
   if (smaTrend) score += 5;
+    if (candleConfirmation) score += 10;
+    if (momentumAligned) score += 10;
 
-  let now = new Date().getTime();
-  if (!global.lastScanLog || now - global.lastScanLog > 60000) {
+    const now = new Date();
+    const nowMs = now.getTime();
+    const currentMinute = now.toISOString().slice(0, 16);
+    if (!global.lastScanLog || nowMs - global.lastScanLog > 60000) {
       console.log(`[SCANNER] Still actively scanning ${dynamicPairs.length} coins... Last checked ${asset} (Score: ${score})`);
-      global.lastScanLog = now;
+            global.lastScanLog = nowMs;
   }
 
-  // Demand higher accuracy entry (Lowered threshold for more frequent trading, originally 95)
-  if (score >= 75) { 
-    const dir = isOrderBookHeavyBid ? 'LONG' : 'SHORT';
-    const decimals = price.toString().split('.')[1]?.length || 4;
+    const entrySecond = now.getUTCSeconds();
+    if (entrySecond !== 59 || lastEntryMinute === currentMinute) return;
 
-    console.log(`\n> [BINARY DEMO LEAD] ${asset} at $${price.toFixed(decimals)} | CONFIDENCE: ${score}% | DIR: ${dir}`);
-    console.log(`  |- Expiration Time: 1 Minute | Fixed Demo Payout: 82%`);
-    console.log(`  |- Placing $1.00 Virtual Bet...`);
+    const rsiLong = rsi <= 35;
+    const rsiShort = rsi >= 65;
+    const trendLong = isOrderBookHeavyBid;
+    const trendShort = !isOrderBookHeavyBid;
+    const candleLong = candles.length > 0 && (candles[candles.length - 2].close > candles[candles.length - 2].open);
+    const candleShort = candles.length > 0 && (candles[candles.length - 2].close < candles[candles.length - 2].open);
+    const structureLong = orderBlockActive || liquiditySweep || supportResistanceConfluence || fvgActive;
+    const structureShort = orderBlockActive || liquiditySweep || supportResistanceConfluence || fvgActive;
+    const momentumLong = momentumAligned && candles[candles.length - 2].close >= candles[candles.length - 3].close;
+    const momentumShort = momentumAligned && candles[candles.length - 2].close <= candles[candles.length - 3].close;
+
+    const longVotes = [rsiLong, trendLong, candleLong, momentumLong, structureLong].filter(Boolean).length;
+    const shortVotes = [rsiShort, trendShort, candleShort, momentumShort, structureShort].filter(Boolean).length;
+
+    const rsiConfirmed = rsiLong || rsiShort || (rsi > 50 && isOrderBookHeavyBid) || (rsi < 50 && !isOrderBookHeavyBid);
+    const confluenceReady = rsiConfirmed && candleConfirmation && momentumAligned;
+
+    if (rsiLong) score += 15;
+    if (rsiShort) score += 15;
+    if (rsiConfirmed) score += 10;
+
+    // Binary entry only at the 59th second of the candle.
+    if (score >= 80 && confluenceReady && (longVotes >= 3 || shortVotes >= 3)) {
+        const dir = longVotes > shortVotes ? 'LONG' : 'SHORT';
+        const decimals = price.toString().split('.')[1]?.length || 4;
+
+        console.log(`\n> [BINARY DEMO LEAD] ${asset} at $${price.toFixed(decimals)} | CONFIDENCE: ${score}% | RSI: ${rsi.toFixed(2)} | DIR: ${dir}`);
+        console.log(`  |- Entry Time: UTC second 59 | Expiration Time: 1 Minute | Fixed Demo Payout: 82%`);
+        console.log(`  |- Confluence: RSI + Candle + Momentum + Structure + Trend`);
+        console.log(`  |- Placing $1.00 Virtual Bet...`);
     
-    activeTrade = {
-        time: new Date().toISOString(),
-        asset, dir, entry: price, 
-        expiry: Date.now() + 60000, // 60 seconds exactly
-        conf: score
-    };
+        activeTrade = {
+            time: new Date().toISOString(),
+            asset, dir, entry: price, 
+            expiry: Date.now() + 60000, // 60 seconds exactly
+            conf: score,
+            rsi
+        };
+        lastEntryMinute = currentMinute;
   }
 }
 
 initTop200().then(() => {
-  setInterval(scan, 5000);
+    setInterval(scan, 1000);
 });
 
 // Periodic backup
