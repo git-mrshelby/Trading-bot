@@ -18,15 +18,15 @@ function randomWalk(price, drift, vol) {
 function generateReports() {
     // 1. JSON Data Audit
     const report = { timestamp: new Date().toISOString(), dailyPnL, totalPnL, tradeCount: trades.length, trades };
-    fs.writeFileSync('daily_report.json', JSON.stringify(report, null, 2));
+    fs.writeFileSync('daily_report_binary.json', JSON.stringify(report, null, 2));
 
-    // 2. Beautiful PDF Audit for GitHub
+    // 2. Beautiful PDF Audit
     try {
         const doc = new PDFDocument({ margin: 50 });
-        doc.pipe(fs.createWriteStream('daily_report.pdf'));
+        doc.pipe(fs.createWriteStream('daily_report_binary.pdf'));
         
         // Header
-        doc.fillColor('#000000').fontSize(24).text('Godzilla HFT Protocol', { align: 'center' });
+        doc.fillColor('#000000').fontSize(24).text('Godzilla Binary Options (Quotex) Simulator', { align: 'center' });
         doc.fillColor('#555555').fontSize(12).text('Automated Daily Execution Audit', { align: 'center' });
         doc.moveDown(2);
         
@@ -56,13 +56,13 @@ function generateReports() {
         });
         
         doc.end();
-        console.log(">>> OFFICIAL PDF & JSON AUDITS GENERATED FOR GITHUB ARTIFACTS.");
+        console.log(">>> OFFICIAL PDF & JSON AUDITS GENERATED.");
     } catch (e) {
         console.log("PDF Generation failed", e);
     }
 }
 
-console.log("--- GODZILLA HFT HEADLESS ENGINE STARTED ---");
+console.log("--- GODZILLA QUOTEX / BINARY OPTIONS DEMO SIMULATOR ---");
 console.log(`Time: ${new Date().toISOString()}`);
 
 async function initTop200() {
@@ -138,7 +138,7 @@ async function scan() {
       return;
   }
 
-  // 2. REAL MARKET RESOLUTION TRACKER
+  // 2. REAL BINARY OPTIONS (QUOTEX) EXPIRATION TRACKER
   if (activeTrade) {
       const decimals = activeTrade.entry.toString().split('.')[1]?.length || 4;
       try {
@@ -150,32 +150,44 @@ async function scan() {
           
           let won = false;
           let lost = false;
+          let tie = false;
+          const timeLeft = activeTrade.expiry - Date.now();
 
-          if (activeTrade.dir === 'LONG') {
-              if (currentPrice >= activeTrade.tp) won = true;
-              if (currentPrice <= activeTrade.sl) lost = true;
-          } else { 
-              if (currentPrice <= activeTrade.tp) won = true;
-              if (currentPrice >= activeTrade.sl) lost = true;
+          if (timeLeft <= 0) { // Time's up! Check final closing price
+              if (activeTrade.dir === 'LONG') {
+                  if (currentPrice > activeTrade.entry) won = true;
+                  else if (currentPrice < activeTrade.entry) lost = true;
+                  else tie = true;
+              } else { 
+                  if (currentPrice < activeTrade.entry) won = true;
+                  else if (currentPrice > activeTrade.entry) lost = true;
+                  else tie = true;
+              }
           }
 
-          if (won || lost) {
-             const profit = won ? 0.50 : -0.50; 
+          if (won || lost || tie) {
+             const betSize = 1.00; // $1 demo quote test
+             const payoutRate = 0.82; // 82% Average Binary Options Payout
+             
+             let profit = 0;
+             if (won) profit = betSize * payoutRate;
+             if (lost) profit = -betSize; 
+
              dailyPnL += profit;
              totalPnL += profit;
              
-             activeTrade.status = won ? 'WON' : 'LOST';
+             activeTrade.status = won ? 'WON' : (lost ? 'LOST' : 'REFUND');
              activeTrade.profit = profit;
              activeTrade.closingPrice = currentPrice;
              trades.push(activeTrade);
              
-             console.log(`> [EXECUTION] ${activeTrade.status}! Exit Price: $${currentPrice.toFixed(4)} | Profit: $${profit.toFixed(2)} | Today: $${dailyPnL.toFixed(2)} / $10.00`);
+             console.log(`> [EXECUTION] ${activeTrade.status}! Expiry Price: $${currentPrice.toFixed(decimals)} | Profit: $${profit.toFixed(2)} | Today Balance: $${dailyPnL.toFixed(2)}`);
              activeTrade = null; 
              
-             // Generate report on every trade completion just to be safe
+             // Generate report on every trade completion
              generateReports();
           } else {
-             console.log(`[TRACKING] ${activeTrade.asset} ${activeTrade.dir} | Entry: $${activeTrade.entry.toFixed(decimals)} | Live: $${currentPrice.toFixed(decimals)}... Waiting for Target`);
+             console.log(`[TRACKING] ${activeTrade.asset} ${activeTrade.dir} | Entry: $${activeTrade.entry.toFixed(decimals)} | Live: $${currentPrice.toFixed(decimals)}... T-${Math.floor(timeLeft/1000)}s Expiry`);
           }
       } catch (e) {}
       return; 
@@ -259,21 +271,17 @@ async function scan() {
   // Demand higher accuracy entry (Lowered threshold for more frequent trading, originally 95)
   if (score >= 75) { 
     const dir = isOrderBookHeavyBid ? 'LONG' : 'SHORT';
-    // Mathematical Edge Fix: Make SL wider than TP for higher win rate, or match payout to distance.
-    const tpMove = price * 0.0010;  // 0.10% TP (Closer = Higher Win Rate)
-    const slMove = price * 0.0015; // 0.15% SL (Wider = Room to breathe)
     const decimals = price.toString().split('.')[1]?.length || 4;
-    
-    const tp = parseFloat((dir === 'LONG' ? price + tpMove : price - tpMove).toFixed(decimals));
-    const sl = parseFloat((dir === 'LONG' ? price - slMove : price + slMove).toFixed(decimals));
 
-    console.log(`\n> [GODZILLA LEAD] ${asset} at $${price.toFixed(decimals)} | CONFIDENCE: ${score}% | DIR: ${dir}`);
-    console.log(`  |- Real TP: $${tp.toFixed(decimals)} | Real SL: $${sl.toFixed(decimals)} (Max -$0.5 Limit)`);
-    console.log(`  |- Target: $0.5 Profit | 50x Leverage Engaged...`);
+    console.log(`\n> [BINARY DEMO LEAD] ${asset} at $${price.toFixed(decimals)} | CONFIDENCE: ${score}% | DIR: ${dir}`);
+    console.log(`  |- Expiration Time: 1 Minute | Fixed Demo Payout: 82%`);
+    console.log(`  |- Placing $1.00 Virtual Bet...`);
     
     activeTrade = {
         time: new Date().toISOString(),
-        asset, dir, entry: price, tp, sl, conf: score
+        asset, dir, entry: price, 
+        expiry: Date.now() + 60000, // 60 seconds exactly
+        conf: score
     };
   }
 }
