@@ -223,12 +223,14 @@ async function scan() {
       const maxHigh = Math.max(...candles.map(c => c.high));
       supportResistanceConfluence = (currentClosed - minLow) / currentClosed < 0.0015 || (maxHigh - currentClosed) / currentClosed < 0.0015;
 
-      // Smart Money Liquidity Sweeps
-      liquiditySweep = (last.low < Math.min(...candles.slice(0, 10).map(c => c.low)) && last.close > prev.low) || 
-                       (last.high > Math.max(...candles.slice(0, 10).map(c => c.high)) && last.close < prev.high);
+      // Smart Money Liquidity Sweeps (Fixed Array Indexing)
+      const recent10 = candles.slice(-12, -2); // The 10 candles just before our 'last' candle
+      liquiditySweep = (last.low < Math.min(...recent10.map(c => c.low)) && last.close > prev.low) || 
+                       (last.high > Math.max(...recent10.map(c => c.high)) && last.close < prev.high);
 
-      // Technical Trendline & EMA Alignment
-      const avg = candles.reduce((sum, c) => sum + c.close, 0) / candles.length;
+      // Technical Trendline & EMA Alignment (Recent 50-candle EMA)
+      const recent50 = candles.slice(-52, -2);
+      const avg = recent50.reduce((sum, c) => sum + c.close, 0) / recent50.length;
       isOrderBookHeavyBid = price > avg; // Define direction based on trend
       smaTrend = true;
 
@@ -252,8 +254,9 @@ async function scan() {
   // Demand higher accuracy entry (Lowered threshold for more frequent trading, originally 95)
   if (score >= 75) { 
     const dir = isOrderBookHeavyBid ? 'LONG' : 'SHORT';
-    const tpMove = price * 0.0015;  // 0.15% price move to achieve profit
-    const slMove = price * 0.0010; // Tighter 0.10% price check for Stop Loss
+    // Mathematical Edge Fix: Make SL wider than TP for higher win rate, or match payout to distance.
+    const tpMove = price * 0.0010;  // 0.10% TP (Closer = Higher Win Rate)
+    const slMove = price * 0.0015; // 0.15% SL (Wider = Room to breathe)
     const decimals = price.toString().split('.')[1]?.length || 4;
     
     const tp = parseFloat((dir === 'LONG' ? price + tpMove : price - tpMove).toFixed(decimals));
