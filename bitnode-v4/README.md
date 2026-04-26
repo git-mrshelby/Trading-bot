@@ -1,70 +1,99 @@
-# Godzilla Crypto HFT Bot (Binance Data)
+# Bitnode v4 - Crypto HFT (Binance Data)
 
-This bot now runs in crypto mode and uses real Binance Futures market data.
-It scans high-volume USDT perpetual pairs, opens one trade at a time, books TP or SL, then rotates to the next setup.
+This workspace now includes a headless crypto bot at `bot-headless.js` that:
 
-Default mode is paper trading. You can also connect Binance Futures testnet for demo account execution.
+- Uses real Binance market data (spot public API).
+- Scans high-volume USDT pairs.
+- Opens one trade at a time with TP/SL.
+- Closes the trade at TP, SL, or max-hold timeout.
+- Books PnL, then moves to the next trade.
+- Writes audit logs to JSON + PDF reports.
 
-## Strategy Summary
+## Important Reality Check
 
-The signal engine follows a fast confluence model inspired by high-frequency crypto scanners:
+No strategy can be made guaranteed profitable in live markets. This bot is structured for safe testing, risk controls, and measurable iteration.
 
-1. Top symbols by volatility x quote volume.
-2. 1m structure checks on each symbol in sequence.
-3. EMA(9/21), RSI, breakout, volume spike, and momentum vote scoring.
-4. Trade only if confidence reaches threshold.
-5. Set TP/SL at entry and exit quickly, then move to next trade.
+## Execution Modes
 
-## Setup
+Set `EXECUTION_MODE`:
 
-1. Open a terminal in this folder.
-2. Install dependencies:
+- `paper` (default): Real market data, simulated fills. Safest mode.
+- `binance-testnet`: Sends real API orders to Binance Spot Testnet.
+- `binance-live`: Sends real API orders to Binance live account (high risk).
+
+## Quick Start
+
+1. Open terminal in this folder.
+2. Install packages (if needed):
 
 ```bash
 npm install
 ```
 
-3. Copy environment template and edit:
+3. Run in paper mode:
 
 ```bash
-copy .env.example .env
+set EXECUTION_MODE=paper
+node bot-headless.js
 ```
 
-4. Run the bot:
+PowerShell version:
 
-```bash
-npm run bot
+```powershell
+$env:EXECUTION_MODE='paper'
+node bot-headless.js
 ```
 
-Reports are written to:
+## Binance Demo/Testnet Connection
 
-- daily_report.json
-- daily_report.pdf
+1. Create Binance Spot Testnet API key/secret from Binance testnet portal.
+2. Set environment variables:
 
-## Connect Binance Demo Account (Testnet)
+PowerShell:
 
-1. Create/login at Binance Futures testnet:
-	https://testnet.binancefuture.com
-2. Create API key and secret in testnet API management.
-3. In .env set:
-
-```env
-EXECUTION_MODE=testnet
-BINANCE_API_KEY=your_testnet_key
-BINANCE_API_SECRET=your_testnet_secret
+```powershell
+$env:EXECUTION_MODE='binance-testnet'
+$env:BINANCE_API_KEY='your_testnet_key'
+$env:BINANCE_API_SECRET='your_testnet_secret'
+node bot-headless.js
 ```
 
-4. Keep market data on real endpoint:
+3. Verify first runs in testnet before trying live.
 
-```env
-BINANCE_MARKET_BASE=https://fapi.binance.com
+## Core Risk Parameters
+
+You can tune these with env vars:
+
+- `RISK_PER_TRADE_USD` (default `15`)
+- `TP_PCT` (default `0.003` = 0.30%)
+- `SL_PCT` (default `0.002` = 0.20%)
+- `MAX_HOLD_SECONDS` (default `180`)
+- `MIN_SIGNAL_SCORE` (default `5`)
+- `DAILY_PROFIT_TARGET_USD` (default `20`)
+- `DAILY_LOSS_LIMIT_USD` (default `-8`)
+
+Example:
+
+```powershell
+$env:EXECUTION_MODE='paper'
+$env:RISK_PER_TRADE_USD='10'
+$env:TP_PCT='0.0025'
+$env:SL_PCT='0.0018'
+$env:MIN_SIGNAL_SCORE='6'
+node bot-headless.js
 ```
 
-5. Start bot with npm run bot.
+## Reports
 
-## Important Notes
+Generated in this folder:
 
-- Testnet mode sends real API orders to Binance Futures testnet (demo money only).
-- Paper mode never sends exchange orders.
-- This is an experimental strategy bot, not guaranteed profit.
-- Tune risk limits in .env before live experimentation.
+- `daily_report.json`
+- `daily_report.pdf`
+
+Each closed trade stores entry/exit, TP/SL, hold time, reason (`TP_HIT`, `SL_HIT`, `TIME_EXIT`) and PnL.
+
+## Recommended Rollout
+
+1. Run `paper` mode for several days and inspect report statistics.
+2. Move to `binance-testnet` with small size and validate order behavior.
+3. Only then consider `binance-live` with strict risk limits.
