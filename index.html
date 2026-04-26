@@ -107,7 +107,8 @@
             useEffect(() => {
                 const fetchReport = async () => {
                     try {
-                        const res = await fetch('bitnode-v4/daily_report.json');
+                        const dateStr = new Date().toISOString().split('T')[0];
+                        const res = await fetch(`bitnode-v4/reports/${dateStr}/daily_report.json`);
                         const data = await res.json();
                         setTrades(data.trades || []);
                         setStats({

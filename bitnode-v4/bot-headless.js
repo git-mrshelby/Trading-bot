@@ -276,12 +276,22 @@ async function closeTrade(trade, currentPrice, reason) {
 }
 
 function generateReports() {
+  const dateStr = new Date().toISOString().split('T')[0];
+  const reportDir = `reports/${dateStr}`;
+  
+  if (!fs.existsSync(reportDir)) {
+    fs.mkdirSync(reportDir, { recursive: true });
+  }
+
+  const jsonPath = `${reportDir}/daily_report.json`;
+  const pdfPath = `${reportDir}/daily_report.pdf`;
+
   const report = { timestamp: new Date().toISOString(), mode: CONFIG.executionMode, dailyPnL, totalPnL, tradeCount: trades.length, trades };
-  fs.writeFileSync(CONFIG.reportJsonPath, JSON.stringify(report, null, 2));
+  fs.writeFileSync(jsonPath, JSON.stringify(report, null, 2));
 
   try {
     const doc = new PDFDocument({ margin: 50 });
-    doc.pipe(fs.createWriteStream(CONFIG.reportPdfPath));
+    doc.pipe(fs.createWriteStream(pdfPath));
     doc.fillColor('#000000').fontSize(22).text('Bitnode HFT Audit Report', { align: 'center' });
     doc.fontSize(10).text(`Mode: ${CONFIG.executionMode} | Date: ${new Date().toLocaleString()}`, { align: 'center' });
     doc.moveDown(2);
@@ -292,7 +302,22 @@ function generateReports() {
       doc.fontSize(10).fillColor(t.profit > 0 ? '#008000' : '#FF0000').text(`${t.endTime} | ${t.symbol} | ${t.direction} | PnL: $${t.profit.toFixed(2)} (${t.reason})`);
     });
     doc.end();
-  } catch (e) {}
+    gitSync(pdfPath);
+  } catch (e) {
+    console.error(`[REPORT ERROR] PDF generation failed: ${e.message}`);
+  }
+}
+
+async function gitSync(filePath) {
+  const { exec } = await import('child_process');
+  const dateStr = new Date().toISOString().split('T')[0];
+  exec(`git add "${filePath}" && git commit -m "Audit Report: ${dateStr}" && git push`, (err) => {
+    if (err) {
+      // Silent fail if git is not configured
+      return;
+    }
+    console.log(`[GIT] Report synced to repository: ${dateStr}`);
+  });
 }
 
 async function mainLoop() {
