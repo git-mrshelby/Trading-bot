@@ -1,19 +1,35 @@
 import axios from 'axios';
+import crypto from 'crypto';
 import fs from 'fs';
 import PDFDocument from 'pdfkit';
+
+const MARKET_DATA_BASE = process.env.BINANCE_MARKET_BASE || 'https://fapi.binance.com';
+const TESTNET_BASE = process.env.BINANCE_TESTNET_BASE || 'https://testnet.binancefuture.com';
+const EXECUTION_MODE = (process.env.EXECUTION_MODE || 'paper').toLowerCase();
+const API_KEY = process.env.BINANCE_API_KEY || '';
+const API_SECRET = process.env.BINANCE_API_SECRET || '';
+
+const SCAN_INTERVAL_MS = Number(process.env.SCAN_INTERVAL_MS || 1500);
+const MAX_SYMBOLS = Number(process.env.MAX_SYMBOLS || 30);
+const LEVERAGE = Number(process.env.LEVERAGE || 5);
+const NOTIONAL_USDT = Number(process.env.NOTIONAL_USDT || 40);
+const TAKE_PROFIT_PCT = Number(process.env.TAKE_PROFIT_PCT || 0.0018);
+const STOP_LOSS_PCT = Number(process.env.STOP_LOSS_PCT || 0.0012);
+const CONFIDENCE_THRESHOLD = Number(process.env.CONFIDENCE_THRESHOLD || 78);
+const DAILY_TARGET_USDT = Number(process.env.DAILY_TARGET_USDT || 10);
+const DAILY_STOP_USDT = Number(process.env.DAILY_STOP_USDT || -3);
 
 let dailyPnL = 0;
 let totalPnL = 0;
 let trades = [];
-
 let dynamicPairs = [];
 let livePrices = {};
+let symbolMeta = {};
 let activeTrade = null;
-let lastEntryMinute = null;
+let scanIndex = 0;
 
-function randomWalk(price, drift, vol) {
-  const shock = (Math.random() + Math.random() + Math.random() + Math.random() - 2) * 1.5;
-  return price * Math.exp((drift - 0.5 * Math.pow(vol, 2)) + vol * shock);
+function wait(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function calculateRSI(closes, period = 14) {
@@ -22,19 +38,19 @@ function calculateRSI(closes, period = 14) {
     let gains = 0;
     let losses = 0;
 
-    for (let i = 1; i <= period; i++) {
-        const change = closes[i] - closes[i - 1];
-        if (change >= 0) gains += change;
-        else losses -= change;
+    for (let i = 1; i <= period; i += 1) {
+        const delta = closes[i] - closes[i - 1];
+        if (delta >= 0) gains += delta;
+        else losses -= delta;
     }
 
     let avgGain = gains / period;
     let avgLoss = losses / period;
 
-    for (let i = period + 1; i < closes.length; i++) {
-        const change = closes[i] - closes[i - 1];
-        avgGain = ((avgGain * (period - 1)) + Math.max(change, 0)) / period;
-        avgLoss = ((avgLoss * (period - 1)) + Math.max(-change, 0)) / period;
+    for (let i = period + 1; i < closes.length; i += 1) {
+        const delta = closes[i] - closes[i - 1];
+        avgGain = ((avgGain * (period - 1)) + Math.max(delta, 0)) / period;
+        avgLoss = ((avgLoss * (period - 1)) + Math.max(-delta, 0)) / period;
     }
 
     if (avgLoss === 0) return 100;
@@ -42,330 +58,401 @@ function calculateRSI(closes, period = 14) {
     return 100 - (100 / (1 + rs));
 }
 
-function generateReports() {
-    // 1. JSON Data Audit
-    const report = { timestamp: new Date().toISOString(), dailyPnL, totalPnL, tradeCount: trades.length, trades };
-    fs.writeFileSync('daily_report_binary.json', JSON.stringify(report, null, 2));
+function calculateEMA(values, period) {
+    if (!values.length) return 0;
+    const multiplier = 2 / (period + 1);
+    let ema = values[0];
+    for (let i = 1; i < values.length; i += 1) {
+        ema = ((values[i] - ema) * multiplier) + ema;
+    }
+    return ema;
+}
 
-    // 2. Beautiful PDF Audit
+function hmacSha256(secret, payload) {
+    return crypto.createHmac('sha256', secret).update(payload).digest('hex');
+}
+
+function formatQuantity(symbol, rawQty) {
+    const meta = symbolMeta[symbol] || { stepSize: 0.001, minQty: 0.001, quantityPrecision: 3 };
+    const step = Number(meta.stepSize || 0.001);
+    const minQty = Number(meta.minQty || step);
+    const precision = Number(meta.quantityPrecision ?? 3);
+
+    const stepped = Math.floor(rawQty / step) * step;
+    const bounded = Math.max(stepped, minQty);
+    return Number(bounded.toFixed(precision));
+}
+
+async function sendSignedOrder(baseUrl, params) {
+    if (!API_KEY || !API_SECRET) {
+        throw new Error('Missing BINANCE_API_KEY or BINANCE_API_SECRET for testnet mode.');
+    }
+
+    const payload = new URLSearchParams({ ...params, timestamp: Date.now().toString() }).toString();
+    const signature = hmacSha256(API_SECRET, payload);
+    const url = `${baseUrl}/fapi/v1/order?${payload}&signature=${signature}`;
+
+    const response = await axios.post(url, null, {
+        headers: {
+            'X-MBX-APIKEY': API_KEY
+        },
+        timeout: 15000
+    });
+
+    return response.data;
+}
+
+async function setLeverage(symbol) {
+    if (!API_KEY || !API_SECRET) return;
+
+    const payload = new URLSearchParams({
+        symbol,
+        leverage: String(LEVERAGE),
+        timestamp: Date.now().toString()
+    }).toString();
+
+    const signature = hmacSha256(API_SECRET, payload);
+    const url = `${TESTNET_BASE}/fapi/v1/leverage?${payload}&signature=${signature}`;
+
+    await axios.post(url, null, {
+        headers: {
+            'X-MBX-APIKEY': API_KEY
+        },
+        timeout: 15000
+    });
+}
+
+function generateReports() {
+    const report = {
+        timestamp: new Date().toISOString(),
+        executionMode: EXECUTION_MODE,
+        dailyPnL,
+        totalPnL,
+        tradeCount: trades.length,
+        trades
+    };
+
+    fs.writeFileSync('daily_report.json', JSON.stringify(report, null, 2));
+
     try {
         const doc = new PDFDocument({ margin: 50 });
-        doc.pipe(fs.createWriteStream('daily_report_binary.pdf'));
-        
-        // Header
-        doc.fillColor('#000000').fontSize(24).text('Godzilla Binary Options (Quotex) Simulator', { align: 'center' });
-        doc.fillColor('#555555').fontSize(12).text('Automated Daily Execution Audit', { align: 'center' });
+        doc.pipe(fs.createWriteStream('daily_report.pdf'));
+
+        doc.fillColor('#000000').fontSize(22).text('Godzilla Crypto HFT Session Report', { align: 'center' });
+        doc.fillColor('#444444').fontSize(12).text(`Mode: ${EXECUTION_MODE.toUpperCase()}`, { align: 'center' });
         doc.moveDown(2);
-        
-        // Stats
-        doc.fillColor('#000000').fontSize(14).text(`Date: ${new Date().toLocaleDateString()}`);
-        doc.text(`Time: ${new Date().toLocaleTimeString()} (UTC)`);
-        doc.text(`Total Trades: ${trades.length}`);
-        
-        // Color code PnL
-        const pnlColor = dailyPnL >= 0 ? '#22c55e' : '#ef4444';
-        doc.fillColor(pnlColor).text(`Net Daily PnL: $${dailyPnL.toFixed(2)}`);
-        doc.moveDown(2);
-        
-        // Trades
-        doc.fillColor('#000000').fontSize(16).text('Trade History Log:', { underline: true });
+
+        doc.fillColor('#000000').fontSize(13).text(`Timestamp: ${new Date().toISOString()}`);
+        doc.text(`Trades: ${trades.length}`);
+        doc.text(`Daily PnL: ${dailyPnL.toFixed(2)} USDT`);
+        doc.text(`Total PnL: ${totalPnL.toFixed(2)} USDT`);
         doc.moveDown();
-        
-        trades.forEach((t, i) => {
-            const resColor = t.status === 'WON' ? '#22c55e' : '#ef4444';
-            doc.fillColor('#000000').fontSize(12).text(`Trade #${i+1} | ${t.time}`);
-            doc.text(`Asset: ${t.asset} | Route: ${t.dir} | Confidence: ${t.conf}%`);
-            doc.text(`Entry: $${t.entry.toFixed(4)}`);
-            doc.text(`Exit: $${t.closingPrice ? t.closingPrice.toFixed(4) : 'N/A'}`);
-            
-            doc.fillColor(resColor).text(`Result: ${t.status} | PnL: $${t.profit.toFixed(2)}`);
-            doc.moveDown();
+
+        trades.slice(-25).forEach((trade, index) => {
+            const color = trade.profit >= 0 ? '#16a34a' : '#dc2626';
+            doc.fillColor('#111111').fontSize(11).text(`#${index + 1} ${trade.time} ${trade.asset} ${trade.dir}`);
+            doc.text(`Entry: ${trade.entry.toFixed(4)} Exit: ${trade.closingPrice.toFixed(4)} Qty: ${trade.qty}`);
+            doc.fillColor(color).text(`Result: ${trade.status} PnL: ${trade.profit.toFixed(2)} USDT`);
+            doc.moveDown(0.5);
         });
-        
+
         doc.end();
-        console.log(">>> OFFICIAL PDF & JSON AUDITS GENERATED.");
-    } catch (e) {
-        console.log("PDF Generation failed", e);
+    } catch (error) {
+        console.log('[REPORT] PDF generation failed:', error.message);
     }
 }
 
-console.log("--- GODZILLA QUOTEX / BINARY OPTIONS DEMO SIMULATOR ---");
-console.log(`Time: ${new Date().toISOString()}`);
+async function initSymbols() {
+    console.log('[BOOT] Fetching top crypto futures symbols from Binance...');
 
-async function initTop200() {
-  console.log("Status: INITIALIZING TOP MARKET SCAN VIA KUCOIN...");
-  
-  let retries = 5;
-  while (retries > 0) {
-    try {
-      // 1. Fetching highly volatile flow using KuCoin API (Usually avoids geo-blocks)
-      const res = await axios.get('https://api.kucoin.com/api/v1/market/allTickers');
-      let usdtPairs = res.data.data.ticker.filter(p => p.symbol.endsWith('-USDT'));
-      
-      const deadCoins = ['USDC', 'FDUSD', 'TUSD', 'BUSD', 'DAI', 'USDP', 'EUR', 'GBP', 'TRY', 'AEUR', 'USDE'];
-      usdtPairs = usdtPairs.filter(p => {
-          const base = p.symbol.replace('-USDT', '');
-          const hasVolume = parseFloat(p.volValue) > 5000000; // $5M min volume
-          return !deadCoins.includes(base) && hasVolume;
-      });
+    const [ticker24h, exchangeInfo] = await Promise.all([
+        axios.get(`${MARKET_DATA_BASE}/fapi/v1/ticker/24hr`, { timeout: 15000 }),
+        axios.get(`${MARKET_DATA_BASE}/fapi/v1/exchangeInfo`, { timeout: 15000 })
+    ]);
 
-      // Filter for most active/volatile
-      usdtPairs.sort((a, b) => {
-          const scoreA = Math.abs(parseFloat(a.changeRate || 0)) * parseFloat(a.volValue || 0);
-          const scoreB = Math.abs(parseFloat(b.changeRate || 0)) * parseFloat(b.volValue || 0);
-          return scoreB - scoreA; 
-      });
-      
-      const topStream = usdtPairs.slice(0, 30);
-      dynamicPairs = topStream.map(p => p.symbol);
-      
-      topStream.forEach(p => {
-         livePrices[p.symbol] = parseFloat(p.last);
-      });
-      
-      console.log(`[NETWORK] Live KuCoin Data Stream Synced: Extracted ${dynamicPairs.length} High-Frequency Coins.`);
-      return; // Break out of retry loop on success
-    } catch (e) {
-      retries--;
-      console.log(`[NETWORK RETRY] KuCoin Sync failed (${e.message}). Retries left: ${retries}`);
-      if (retries > 0) await new Promise(resolve => setTimeout(resolve, 2000));
+    const symbols = ticker24h.data
+        .filter((row) => row.symbol.endsWith('USDT'))
+        .map((row) => ({
+            symbol: row.symbol,
+            score: Math.abs(Number(row.priceChangePercent || 0)) * Number(row.quoteVolume || 0),
+            price: Number(row.lastPrice)
+        }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, MAX_SYMBOLS);
+
+    dynamicPairs = symbols.map((s) => s.symbol);
+    symbols.forEach((s) => {
+        livePrices[s.symbol] = s.price;
+    });
+
+    exchangeInfo.data.symbols
+        .filter((s) => dynamicPairs.includes(s.symbol))
+        .forEach((s) => {
+            const lot = s.filters.find((f) => f.filterType === 'LOT_SIZE');
+            symbolMeta[s.symbol] = {
+                stepSize: Number(lot?.stepSize || 0.001),
+                minQty: Number(lot?.minQty || 0.001),
+                quantityPrecision: Number(s.quantityPrecision || 3)
+            };
+        });
+
+    console.log(`[BOOT] Loaded ${dynamicPairs.length} active symbols.`);
+}
+
+async function refreshPrices() {
+    const response = await axios.get(`${MARKET_DATA_BASE}/fapi/v1/ticker/price`, { timeout: 15000 });
+    for (const row of response.data) {
+        if (livePrices[row.symbol] !== undefined || row.symbol === activeTrade?.asset) {
+            livePrices[row.symbol] = Number(row.price);
+        }
     }
-  }
+}
 
-  // Fallback
-  console.log("[NETWORK CRITICAL] KuCoin API Endpoint Timeout after 5 retries.");
-  process.exit(1);
+async function getCandles(symbol, interval = '1m', limit = 80) {
+    const response = await axios.get(`${MARKET_DATA_BASE}/fapi/v1/klines`, {
+        params: { symbol, interval, limit },
+        timeout: 15000
+    });
+
+    return response.data.map((k) => ({
+        openTime: Number(k[0]),
+        open: Number(k[1]),
+        high: Number(k[2]),
+        low: Number(k[3]),
+        close: Number(k[4]),
+        volume: Number(k[5])
+    }));
+}
+
+async function scoreSignal(symbol) {
+    const candles = await getCandles(symbol);
+    if (candles.length < 50) return null;
+
+    const last = candles[candles.length - 2];
+    const prev = candles[candles.length - 3];
+    const prev2 = candles[candles.length - 4];
+    const closes = candles.map((c) => c.close);
+    const volumes = candles.map((c) => c.volume);
+
+    const ema9 = calculateEMA(closes.slice(-25), 9);
+    const ema21 = calculateEMA(closes.slice(-35), 21);
+    const rsi = calculateRSI(closes.slice(-30), 14);
+
+    const localHigh = Math.max(...candles.slice(-18, -2).map((c) => c.high));
+    const localLow = Math.min(...candles.slice(-18, -2).map((c) => c.low));
+    const avgVolume = volumes.slice(-22, -2).reduce((sum, v) => sum + v, 0) / 20;
+    const volumeSpike = last.volume > avgVolume * 1.2;
+
+    const momentumUp = last.close > prev.close && prev.close > prev2.close;
+    const momentumDown = last.close < prev.close && prev.close < prev2.close;
+    const breakoutUp = last.close > localHigh;
+    const breakoutDown = last.close < localLow;
+    const bullishCandle = last.close > last.open;
+    const bearishCandle = last.close < last.open;
+
+    const longVotes = [
+        ema9 > ema21,
+        momentumUp,
+        breakoutUp,
+        volumeSpike,
+        rsi > 52 && rsi < 70,
+        bullishCandle
+    ].filter(Boolean).length;
+
+    const shortVotes = [
+        ema9 < ema21,
+        momentumDown,
+        breakoutDown,
+        volumeSpike,
+        rsi < 48 && rsi > 30,
+        bearishCandle
+    ].filter(Boolean).length;
+
+    const side = longVotes >= shortVotes ? 'LONG' : 'SHORT';
+    const votes = Math.max(longVotes, shortVotes);
+    const confidence = 45 + (votes * 9) + (volumeSpike ? 6 : 0);
+
+    if (votes < 4 || confidence < CONFIDENCE_THRESHOLD) {
+        return null;
+    }
+
+    return {
+        symbol,
+        side,
+        confidence,
+        rsi,
+        entry: last.close
+    };
+}
+
+async function placeEntry(signal) {
+    const marketPrice = livePrices[signal.symbol] || signal.entry;
+    const rawQty = (NOTIONAL_USDT * LEVERAGE) / marketPrice;
+    const qty = formatQuantity(signal.symbol, rawQty);
+
+    const tp = signal.side === 'LONG'
+        ? marketPrice * (1 + TAKE_PROFIT_PCT)
+        : marketPrice * (1 - TAKE_PROFIT_PCT);
+
+    const sl = signal.side === 'LONG'
+        ? marketPrice * (1 - STOP_LOSS_PCT)
+        : marketPrice * (1 + STOP_LOSS_PCT);
+
+    if (EXECUTION_MODE === 'testnet') {
+        await setLeverage(signal.symbol);
+        await sendSignedOrder(TESTNET_BASE, {
+            symbol: signal.symbol,
+            side: signal.side === 'LONG' ? 'BUY' : 'SELL',
+            type: 'MARKET',
+            quantity: String(qty)
+        });
+    }
+
+    activeTrade = {
+        time: new Date().toISOString(),
+        mode: EXECUTION_MODE,
+        asset: signal.symbol,
+        dir: signal.side,
+        conf: signal.confidence,
+        rsi: signal.rsi,
+        entry: marketPrice,
+        qty,
+        tp,
+        sl,
+        status: 'OPEN',
+        openedAt: Date.now(),
+        exchangeOrder: EXECUTION_MODE === 'testnet' ? 'LIVE_TESTNET' : 'PAPER'
+    };
+
+    console.log(`\n[ENTRY] ${signal.symbol} ${signal.side} @ ${marketPrice.toFixed(4)} qty=${qty} conf=${signal.confidence}`);
+    console.log(`[ENTRY] TP=${tp.toFixed(4)} SL=${sl.toFixed(4)} mode=${EXECUTION_MODE}`);
+}
+
+async function closeActiveTrade(exitPrice, reason) {
+    if (!activeTrade) return;
+
+    const isLong = activeTrade.dir === 'LONG';
+    const pnl = isLong
+        ? (exitPrice - activeTrade.entry) * activeTrade.qty
+        : (activeTrade.entry - exitPrice) * activeTrade.qty;
+
+    if (EXECUTION_MODE === 'testnet') {
+        await sendSignedOrder(TESTNET_BASE, {
+            symbol: activeTrade.asset,
+            side: isLong ? 'SELL' : 'BUY',
+            type: 'MARKET',
+            reduceOnly: 'true',
+            quantity: String(activeTrade.qty)
+        });
+    }
+
+    dailyPnL += pnl;
+    totalPnL += pnl;
+
+    activeTrade.status = pnl >= 0 ? 'WON' : 'LOST';
+    activeTrade.profit = pnl;
+    activeTrade.reason = reason;
+    activeTrade.closingPrice = exitPrice;
+    activeTrade.closedAt = new Date().toISOString();
+    trades.push(activeTrade);
+
+    console.log(`[EXIT] ${activeTrade.asset} ${activeTrade.status} reason=${reason} pnl=${pnl.toFixed(2)} daily=${dailyPnL.toFixed(2)}`);
+
+    activeTrade = null;
+    generateReports();
+}
+
+async function monitorActiveTrade() {
+    if (!activeTrade) return;
+
+    const currentPrice = livePrices[activeTrade.asset];
+    if (!currentPrice) return;
+
+    if (activeTrade.dir === 'LONG') {
+        if (currentPrice >= activeTrade.tp) {
+            await closeActiveTrade(currentPrice, 'TP');
+            return;
+        }
+        if (currentPrice <= activeTrade.sl) {
+            await closeActiveTrade(currentPrice, 'SL');
+            return;
+        }
+    } else {
+        if (currentPrice <= activeTrade.tp) {
+            await closeActiveTrade(currentPrice, 'TP');
+            return;
+        }
+        if (currentPrice >= activeTrade.sl) {
+            await closeActiveTrade(currentPrice, 'SL');
+            return;
+        }
+    }
+
+    const ageSec = Math.floor((Date.now() - activeTrade.openedAt) / 1000);
+    if (ageSec >= 120) {
+        await closeActiveTrade(currentPrice, 'TIME_EXIT');
+        return;
+    }
+
+    if (ageSec % 10 === 0) {
+        console.log(`[TRACK] ${activeTrade.asset} ${activeTrade.dir} entry=${activeTrade.entry.toFixed(4)} live=${currentPrice.toFixed(4)} age=${ageSec}s`);
+    }
 }
 
 async function scan() {
-  if (dynamicPairs.length === 0) return; 
+    if (!dynamicPairs.length) return;
 
-  // 1. DAILY LIMITS
-  if (dailyPnL >= 10 || dailyPnL <= -2) { 
-    console.log("========================================");
-    if (dailyPnL >= 10) console.log(`  TARGET HIT: $${dailyPnL.toFixed(2)}. HIBERNATING.`);
-    else console.log(`  MAX LOSS HIT: $${dailyPnL.toFixed(2)}. HIBERNATING.`);
-    console.log("========================================");
-    
-    // GENERATE PDF REPORT BEFORE SHUTTING DOWN
-    generateReports();
-    setTimeout(() => process.exit(0), 2000); 
-    return;
-  }
+    if (dailyPnL >= DAILY_TARGET_USDT || dailyPnL <= DAILY_STOP_USDT) {
+        console.log('[RISK] Daily limit reached. Stopping bot.');
+        generateReports();
+        process.exit(0);
+    }
 
-  try {
-      const priceRes = await axios.get('https://api.kucoin.com/api/v1/market/allTickers');
-      priceRes.data.data.ticker.forEach(t => {
-          if (livePrices[t.symbol] !== undefined || dynamicPairs.includes(t.symbol) || activeTrade?.asset === t.symbol) {
-              livePrices[t.symbol] = parseFloat(t.last);
-          }
-      });
-  } catch (e) {
-      console.log("Failed to fetch live prices", e.message);
-      return;
-  }
+    await refreshPrices();
 
-  // 2. REAL BINARY OPTIONS (QUOTEX) EXPIRATION TRACKER
-  if (activeTrade) {
-      const decimals = activeTrade.entry.toString().split('.')[1]?.length || 4;
-      try {
-          // Force live prices to fetch for tracking accuracy
-          const priceRes = await axios.get(`https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${activeTrade.asset}`);
-          let _networkPrice = parseFloat(priceRes.data.data.price);
-          let currentPrice = typeof process.env.GITHUB_ACTIONS !== 'undefined' ? randomWalk(livePrices[activeTrade.asset] || activeTrade.entry, 0.00005, 0.0005) : _networkPrice;
-          livePrices[activeTrade.asset] = currentPrice;
-          
-          let won = false;
-          let lost = false;
-          let tie = false;
-          const timeLeft = activeTrade.expiry - Date.now();
+    if (activeTrade) {
+        await monitorActiveTrade();
+        return;
+    }
 
-          if (timeLeft <= 0) { // Time's up! Check final closing price
-              if (activeTrade.dir === 'LONG') {
-                  if (currentPrice > activeTrade.entry) won = true;
-                  else if (currentPrice < activeTrade.entry) lost = true;
-                  else tie = true;
-              } else { 
-                  if (currentPrice < activeTrade.entry) won = true;
-                  else if (currentPrice > activeTrade.entry) lost = true;
-                  else tie = true;
-              }
-          }
+    const symbol = dynamicPairs[scanIndex % dynamicPairs.length];
+    scanIndex += 1;
 
-          if (won || lost || tie) {
-             const betSize = 1.00; // $1 demo quote test
-             const payoutRate = 0.82; // 82% Average Binary Options Payout
-             
-             let profit = 0;
-             if (won) profit = betSize * payoutRate;
-             if (lost) profit = -betSize; 
+    const signal = await scoreSignal(symbol);
+    if (!signal) return;
 
-             dailyPnL += profit;
-             totalPnL += profit;
-             
-             activeTrade.status = won ? 'WON' : (lost ? 'LOST' : 'REFUND');
-             activeTrade.profit = profit;
-             activeTrade.closingPrice = currentPrice;
-             trades.push(activeTrade);
-             
-             console.log(`> [EXECUTION] ${activeTrade.status}! Expiry Price: $${currentPrice.toFixed(decimals)} | Profit: $${profit.toFixed(2)} | Today Balance: $${dailyPnL.toFixed(2)}`);
-             activeTrade = null; 
-             
-             // Generate report on every trade completion
-             generateReports();
-          } else {
-             console.log(`[TRACKING] ${activeTrade.asset} ${activeTrade.dir} | Entry: $${activeTrade.entry.toFixed(decimals)} | Live: $${currentPrice.toFixed(decimals)}... T-${Math.floor(timeLeft/1000)}s Expiry`);
-          }
-      } catch (e) {}
-      return; 
-  }
-
-  // 3. SCAN THE MARKET FOR NEW LEADS
-  const asset = dynamicPairs[Math.floor(Math.random() * dynamicPairs.length)];
-  let price = livePrices[asset];
-  if (!price) return;
-  
-  // 4. GODZILLA CONSENSUS ENGINE & SMART MONEY CONCEPTS (ICT, FVG, OB, LIQUIDITY)
-  let score = 50; 
-
-  // ICT & TECHNICALS (Adding real market data confluence)
-  let fvgActive = false;
-  let orderBlockActive = false;
-  let supportResistanceConfluence = false;
-  let liquiditySweep = false;
-  let smaTrend = false;
-    let candleConfirmation = false;
-    let momentumAligned = false;
-  let isOrderBookHeavyBid = Math.random() > 0.5; // Default guess
-  let candles = [];
-  let rsi = 50;
-  
-  try {
-      // Fetch immediate 1-minute market structure via KuCoin
-      const klineRes = await axios.get(`https://api.kucoin.com/api/v1/market/candles?type=1min&symbol=${asset}`);
-      
-      candles = klineRes.data.data.map(c => ({
-          open: parseFloat(c[1]), close: parseFloat(c[2]), high: parseFloat(c[3]), low: parseFloat(c[4])
-      })); 
-      
-      // KuCoin returns newest first, so we reverse it to match logic
-      candles = candles.reverse();
-      
-      if (candles.length < 10) return;
-
-      const last = candles[candles.length - 2];    // previous closed candle
-      const prev = candles[candles.length - 3];   // candle before that
-      const prev2 = candles[candles.length - 4];  // and before that
-      
-      const currentClosed = last.close;
-    const bodySize = Math.abs(last.close - last.open);
-    const candleRange = Math.max(last.high - last.low, 0.0000001);
-    const bullishCandle = last.close > last.open && bodySize / candleRange >= 0.45;
-    const bearishCandle = last.close < last.open && bodySize / candleRange >= 0.45;
-    const bullishEngulfing = last.close > prev.open && last.open < prev.close && last.close > last.open;
-    const bearishEngulfing = last.close < prev.open && last.open > prev.close && last.close < last.open;
-      
-      // Fair Value Gap (FVG)
-      fvgActive = Math.abs(prev2.low - last.high) > (currentClosed * 0.0002) || Math.abs(prev2.high - last.low) > (currentClosed * 0.0002);
-      
-      // Institutional Order Block (OB) - Last aggressive counter candle
-      orderBlockActive = (prev.close < prev.open && last.close > last.open && last.close > prev.high) ||
-                         (prev.close > prev.open && last.close < last.open && last.close < prev.low);
-                         
-      // Support/Resistance & Supply/Demand Zones Confirmed
-      const minLow = Math.min(...candles.map(c => c.low));
-      const maxHigh = Math.max(...candles.map(c => c.high));
-      supportResistanceConfluence = (currentClosed - minLow) / currentClosed < 0.0015 || (maxHigh - currentClosed) / currentClosed < 0.0015;
-
-      // Smart Money Liquidity Sweeps (Fixed Array Indexing)
-      const recent10 = candles.slice(-12, -2); // The 10 candles just before our 'last' candle
-      liquiditySweep = (last.low < Math.min(...recent10.map(c => c.low)) && last.close > prev.low) || 
-                       (last.high > Math.max(...recent10.map(c => c.high)) && last.close < prev.high);
-
-      // Technical Trendline & EMA Alignment (Recent 50-candle EMA)
-      const recent50 = candles.slice(-52, -2);
-      const avg = recent50.reduce((sum, c) => sum + c.close, 0) / recent50.length;
-      isOrderBookHeavyBid = price > avg; // Define direction based on trend
-      smaTrend = true;
-      rsi = calculateRSI(candles.map(c => c.close), 14);
-      momentumAligned = (last.close > prev.close && prev.close > prev2.close) || (last.close < prev.close && prev.close < prev2.close);
-      candleConfirmation = bullishCandle || bearishCandle || bullishEngulfing || bearishEngulfing;
-
-  } catch (e) {
-      return; // Skip if we fail dropping indicators
-  }
-
-  // Aggregate into Godzilla's existing confidence metric
-  if (fvgActive) score += 10;
-  if (orderBlockActive) score += 10;
-  if (supportResistanceConfluence) score += 15;
-  if (liquiditySweep) score += 10;
-  if (smaTrend) score += 5;
-    if (candleConfirmation) score += 10;
-    if (momentumAligned) score += 10;
-
-    const now = new Date();
-    const nowMs = now.getTime();
-    const currentMinute = now.toISOString().slice(0, 16);
-    if (!global.lastScanLog || nowMs - global.lastScanLog > 60000) {
-      console.log(`[SCANNER] Still actively scanning ${dynamicPairs.length} coins... Last checked ${asset} (Score: ${score})`);
-            global.lastScanLog = nowMs;
-  }
-
-    const entrySecond = now.getUTCSeconds();
-    if (entrySecond !== 59 || lastEntryMinute === currentMinute) return;
-
-    const rsiLong = rsi <= 35;
-    const rsiShort = rsi >= 65;
-    const trendLong = isOrderBookHeavyBid;
-    const trendShort = !isOrderBookHeavyBid;
-    const candleLong = candles.length > 0 && (candles[candles.length - 2].close > candles[candles.length - 2].open);
-    const candleShort = candles.length > 0 && (candles[candles.length - 2].close < candles[candles.length - 2].open);
-    const structureLong = orderBlockActive || liquiditySweep || supportResistanceConfluence || fvgActive;
-    const structureShort = orderBlockActive || liquiditySweep || supportResistanceConfluence || fvgActive;
-    const momentumLong = momentumAligned && candles[candles.length - 2].close >= candles[candles.length - 3].close;
-    const momentumShort = momentumAligned && candles[candles.length - 2].close <= candles[candles.length - 3].close;
-
-    const longVotes = [rsiLong, trendLong, candleLong, momentumLong, structureLong].filter(Boolean).length;
-    const shortVotes = [rsiShort, trendShort, candleShort, momentumShort, structureShort].filter(Boolean).length;
-
-    const rsiConfirmed = rsiLong || rsiShort || (rsi > 50 && isOrderBookHeavyBid) || (rsi < 50 && !isOrderBookHeavyBid);
-    const confluenceReady = rsiConfirmed && candleConfirmation && momentumAligned;
-
-    if (rsiLong) score += 15;
-    if (rsiShort) score += 15;
-    if (rsiConfirmed) score += 10;
-
-    // Binary entry only at the 59th second of the candle.
-    if (score >= 80 && confluenceReady && (longVotes >= 3 || shortVotes >= 3)) {
-        const dir = longVotes > shortVotes ? 'LONG' : 'SHORT';
-        const decimals = price.toString().split('.')[1]?.length || 4;
-
-        console.log(`\n> [BINARY DEMO LEAD] ${asset} at $${price.toFixed(decimals)} | CONFIDENCE: ${score}% | RSI: ${rsi.toFixed(2)} | DIR: ${dir}`);
-        console.log(`  |- Entry Time: UTC second 59 | Expiration Time: 1 Minute | Fixed Demo Payout: 82%`);
-        console.log(`  |- Confluence: RSI + Candle + Momentum + Structure + Trend`);
-        console.log(`  |- Placing $1.00 Virtual Bet...`);
-    
-        activeTrade = {
-            time: new Date().toISOString(),
-            asset, dir, entry: price, 
-            expiry: Date.now() + 60000, // 60 seconds exactly
-            conf: score,
-            rsi
-        };
-        lastEntryMinute = currentMinute;
-  }
+    await placeEntry(signal);
 }
 
-initTop200().then(() => {
-    setInterval(scan, 1000);
-});
+async function run() {
+    console.log('--- GODZILLA CRYPTO HFT ENGINE (BINANCE DATA) ---');
+    console.log(`Mode=${EXECUTION_MODE.toUpperCase()} MarketData=${MARKET_DATA_BASE}`);
 
-// Periodic backup
-setInterval(generateReports, 1800000); 
+    if (EXECUTION_MODE === 'testnet' && (!API_KEY || !API_SECRET)) {
+        throw new Error('Testnet mode requires BINANCE_API_KEY and BINANCE_API_SECRET.');
+    }
+
+    await initSymbols();
+
+    while (true) {
+        try {
+            await scan();
+        } catch (error) {
+            console.log('[LOOP] Error:', error.message);
+        }
+        await wait(SCAN_INTERVAL_MS);
+    }
+}
+
+setInterval(generateReports, 30 * 60 * 1000);
 
 process.on('SIGINT', () => {
     generateReports();
-    setTimeout(() => process.exit(0), 1000);
+    process.exit(0);
+});
+
+run().catch((error) => {
+    console.error('[FATAL]', error.message);
+    process.exit(1);
 });
 

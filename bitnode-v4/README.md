@@ -1,16 +1,70 @@
-# React + Vite
+# Godzilla Crypto HFT Bot (Binance Data)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This bot now runs in crypto mode and uses real Binance Futures market data.
+It scans high-volume USDT perpetual pairs, opens one trade at a time, books TP or SL, then rotates to the next setup.
 
-Currently, two official plugins are available:
+Default mode is paper trading. You can also connect Binance Futures testnet for demo account execution.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Strategy Summary
 
-## React Compiler
+The signal engine follows a fast confluence model inspired by high-frequency crypto scanners:
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+1. Top symbols by volatility x quote volume.
+2. 1m structure checks on each symbol in sequence.
+3. EMA(9/21), RSI, breakout, volume spike, and momentum vote scoring.
+4. Trade only if confidence reaches threshold.
+5. Set TP/SL at entry and exit quickly, then move to next trade.
 
-## Expanding the ESLint configuration
+## Setup
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+1. Open a terminal in this folder.
+2. Install dependencies:
+
+```bash
+npm install
+```
+
+3. Copy environment template and edit:
+
+```bash
+copy .env.example .env
+```
+
+4. Run the bot:
+
+```bash
+npm run bot
+```
+
+Reports are written to:
+
+- daily_report.json
+- daily_report.pdf
+
+## Connect Binance Demo Account (Testnet)
+
+1. Create/login at Binance Futures testnet:
+	https://testnet.binancefuture.com
+2. Create API key and secret in testnet API management.
+3. In .env set:
+
+```env
+EXECUTION_MODE=testnet
+BINANCE_API_KEY=your_testnet_key
+BINANCE_API_SECRET=your_testnet_secret
+```
+
+4. Keep market data on real endpoint:
+
+```env
+BINANCE_MARKET_BASE=https://fapi.binance.com
+```
+
+5. Start bot with npm run bot.
+
+## Important Notes
+
+- Testnet mode sends real API orders to Binance Futures testnet (demo money only).
+- Paper mode never sends exchange orders.
+- This is an experimental strategy bot, not guaranteed profit.
+- Tune risk limits in .env before live experimentation.
