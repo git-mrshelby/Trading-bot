@@ -21,15 +21,15 @@ const CONFIG = {
   apiSecret: process.env.BINANCE_API_SECRET || '',
   
   // Risk Settings
-  leverage: Number(process.env.LEVERAGE || 50),
-  marginPerTradeUsd: Number(process.env.MARGIN_PER_TRADE || 10),
-  dailyProfitTargetUsd: Number(process.env.DAILY_PROFIT_TARGET_USD || 20),
-  dailyLossLimitUsd: Number(process.env.DAILY_LOSS_LIMIT_USD || -10),
-  tpPct: Number(process.env.TP_PCT || 0.01), // 1% move = 50% profit at 50x
-  slPct: Number(process.env.SL_PCT || 0.005), // 0.5% move = 25% loss at 50x
+  leverage: 50,
+  marginPerTradeUsd: 10,
+  dailyProfitTargetUsd: 5,
+  dailyLossLimitUsd: -2,
+  tpPct: 0.001, // 0.1% move = $0.5 profit at 50x $10
+  slPct: 0.001, // 0.1% move = $0.5 loss at 50x $10
   
   // Scanner Settings
-  scanIntervalMs: 3000, // HFT speed
+  scanIntervalMs: 1000, // 1 second HFT speed
   maxPairs: 30,
   minConfidence: 85,
   
@@ -93,9 +93,10 @@ async function binancePublic(path, params = {}) {
     const res = await axios.get(`${BASE_URL}${path}`, { params, timeout: 10000 });
     return res.data;
   } catch (err) {
-    if (err.response?.status === 451) {
-      console.error(`\n[REGION BLOCKED] Binance Futures is restricted in your region (Error 451).`);
-      console.error(`Try setting MARKET_BASE_URL=https://testnet.binancefuture.com in your .env or use a VPN.`);
+    if (err.response?.status === 451 && BASE_URL !== CONFIG.testnetBaseUrl) {
+      console.warn(`[REGION BLOCKED] Primary API blocked. Retrying with Testnet URL...`);
+      const res = await axios.get(`${CONFIG.testnetBaseUrl}${path}`, { params, timeout: 10000 });
+      return res.data;
     }
     throw err;
   }
@@ -341,8 +342,15 @@ async function boot() {
   console.log(">>> BITNODE HFT ENGINE BOOTING...");
   console.log(`>>> MODE: ${CONFIG.executionMode}`);
   
-  await hydrateExchangeInfo();
-  await refreshTopPairs();
+  try {
+    await hydrateExchangeInfo();
+    await refreshTopPairs();
+  } catch (err) {
+    console.error(`[BOOT ERROR] Initial sync failed: ${err.message}`);
+    console.log("Retrying in 5 seconds...");
+    await sleep(5000);
+    return boot();
+  }
   
   setInterval(async () => {
     try { await mainLoop(); } catch (e) { console.error(`[LOOP ERROR] ${e.message}`); }
