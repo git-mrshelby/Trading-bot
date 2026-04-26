@@ -87,6 +87,11 @@
                 const stream = ASSETS.map(a => a.toLowerCase() + '@ticker').join('/');
                 ws.current = new WebSocket(`wss://fstream.binance.com/ws/${stream}`);
 
+                ws.current.onerror = (e) => {
+                    console.error("WebSocket Error:", e);
+                    alert("Binance WebSocket blocked (Error 451). Try using a VPN or check your region.");
+                };
+
                 ws.current.onmessage = (e) => {
                     const data = JSON.parse(e.data);
                     setPrices(prev => ({

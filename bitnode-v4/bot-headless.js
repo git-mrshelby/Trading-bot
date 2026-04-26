@@ -34,7 +34,7 @@ const CONFIG = {
   minConfidence: 85,
   
   // URLs
-  marketBaseUrl: 'https://fapi.binance.com',
+  marketBaseUrl: process.env.MARKET_BASE_URL || 'https://fapi.binance.com',
   testnetBaseUrl: 'https://testnet.binancefuture.com',
   
   // Files
@@ -89,8 +89,16 @@ function signedQuery(params, secret) {
 }
 
 async function binancePublic(path, params = {}) {
-  const res = await axios.get(`${CONFIG.marketBaseUrl}${path}`, { params, timeout: 10000 });
-  return res.data;
+  try {
+    const res = await axios.get(`${BASE_URL}${path}`, { params, timeout: 10000 });
+    return res.data;
+  } catch (err) {
+    if (err.response?.status === 451) {
+      console.error(`\n[REGION BLOCKED] Binance Futures is restricted in your region (Error 451).`);
+      console.error(`Try setting MARKET_BASE_URL=https://testnet.binancefuture.com in your .env or use a VPN.`);
+    }
+    throw err;
+  }
 }
 
 async function binanceSigned(method, path, params = {}) {
