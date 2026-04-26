@@ -42,7 +42,7 @@ const CONFIG = {
   reportPdfPath: 'daily_report.pdf',
 };
 
-const BASE_URL = CONFIG.executionMode === 'binance-testnet' ? CONFIG.testnetBaseUrl : CONFIG.marketBaseUrl;
+let CURRENT_BASE_URL = CONFIG.executionMode === 'binance-testnet' ? CONFIG.testnetBaseUrl : CONFIG.marketBaseUrl;
 
 let dailyPnL = 0;
 let totalPnL = 0;
@@ -90,15 +90,44 @@ function signedQuery(params, secret) {
 
 async function binancePublic(path, params = {}) {
   try {
-    const res = await axios.get(`${BASE_URL}${path}`, { params, timeout: 10000 });
+    const res = await axios.get(`${CURRENT_BASE_URL}${path}`, { params, timeout: 10000 });
     return res.data;
   } catch (err) {
-    if (err.response?.status === 451 && BASE_URL !== CONFIG.testnetBaseUrl) {
-      console.warn(`[REGION BLOCKED] Primary API blocked. Retrying with Testnet URL...`);
-      const res = await axios.get(`${CONFIG.testnetBaseUrl}${path}`, { params, timeout: 10000 });
+    if (err.response?.status === 451 && CURRENT_BASE_URL !== CONFIG.testnetBaseUrl) {
+      console.warn(`[REGION BLOCKED] Primary API blocked. Permanently switching to Testnet URL for this session.`);
+      CURRENT_BASE_URL = CONFIG.testnetBaseUrl;
+      const res = await axios.get(`${CURRENT_BASE_URL}${path}`, { params, timeout: 10000 });
       return res.data;
     }
     throw err;
+  }
+}
+
+async function getRealPrice(symbol) {
+  try {
+    // Fetch REAL market data from Bybit (Unblocked in most regions)
+    const res = await axios.get(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${symbol}`);
+    return parseFloat(res.data.result.list[0].lastPrice);
+  } catch (e) {
+    // Fallback to current Binance session URL
+    const res = await axios.get(`${CURRENT_BASE_URL}/fapi/v1/ticker/price?symbol=${symbol}`);
+    return parseFloat(res.data.price);
+  }
+}
+
+async function getCandles(symbol, limit = 50) {
+  try {
+    // Fetch REAL market candles from Bybit
+    const res = await axios.get(`https://api.bybit.com/v5/market/kline?category=linear&symbol=${symbol}&interval=1&limit=${limit}`);
+    return res.data.result.list.map(k => ({
+      open: parseFloat(k[1]), high: parseFloat(k[2]), low: parseFloat(k[3]), close: parseFloat(k[4]), vol: parseFloat(k[5])
+    })).reverse();
+  } catch (e) {
+    // Fallback to Binance
+    const klines = await binancePublic('/fapi/v1/klines', { symbol, interval: '1m', limit });
+    return klines.map(k => ({
+      open: parseFloat(k[1]), high: parseFloat(k[2]), low: parseFloat(k[3]), close: parseFloat(k[4]), vol: parseFloat(k[5])
+    }));
   }
 }
 
@@ -106,7 +135,7 @@ async function binanceSigned(method, path, params = {}) {
   if (!CONFIG.apiKey || !CONFIG.apiSecret) throw new Error('Missing API Keys');
   const payload = { ...params, timestamp: Date.now(), recvWindow: 5000 };
   const query = signedQuery(payload, CONFIG.apiSecret);
-  const url = `${BASE_URL}${path}?${query}`;
+  const url = `${CURRENT_BASE_URL}${path}?${query}`;
   const res = await axios({
     method, url, headers: { 'X-MBX-APIKEY': CONFIG.apiKey }, timeout: 10000
   });
@@ -140,13 +169,6 @@ async function refreshTopPairs() {
   dynamicPairs = filtered.map(t => t.symbol);
   filtered.forEach(t => livePrices[t.symbol] = parseFloat(t.lastPrice));
   console.log(`[MARKET] Synced ${dynamicPairs.length} high-volume pairs.`);
-}
-
-async function getCandles(symbol, limit = 50) {
-  const klines = await binancePublic('/fapi/v1/klines', { symbol, interval: '1m', limit });
-  return klines.map(k => ({
-    open: parseFloat(k[1]), high: parseFloat(k[2]), low: parseFloat(k[3]), close: parseFloat(k[4]), vol: parseFloat(k[5])
-  }));
 }
 
 function buildSMC_Signal(candles, price) {
@@ -327,8 +349,7 @@ async function mainLoop() {
   }
 
   if (activeTrade) {
-    const ticker = await binancePublic('/fapi/v1/ticker/price', { symbol: activeTrade.symbol });
-    const currentPrice = parseFloat(ticker.price);
+    const currentPrice = await getRealPrice(activeTrade.symbol);
     
     let shouldClose = false;
     let reason = '';
@@ -346,7 +367,7 @@ async function mainLoop() {
       activeTrade = null;
     } else {
       const pnl = activeTrade.direction === 'LONG' ? (currentPrice - activeTrade.entry) * activeTrade.qty : (activeTrade.entry - currentPrice) * activeTrade.qty;
-      console.log(`[LIVE] ${activeTrade.symbol} | PnL: $${pnl.toFixed(2)} | Price: ${currentPrice}`);
+      console.log(`[LIVE] ${activeTrade.symbol} | PnL: $${pnl.toFixed(2)} | Real Price: ${currentPrice}`);
     }
     return;
   }
@@ -354,8 +375,7 @@ async function mainLoop() {
   // Scan for new opportunity
   const symbol = dynamicPairs[Math.floor(Math.random() * dynamicPairs.length)];
   const candles = await getCandles(symbol);
-  const ticker = await binancePublic('/fapi/v1/ticker/price', { symbol });
-  const price = parseFloat(ticker.price);
+  const price = await getRealPrice(symbol);
   
   const signal = buildSMC_Signal(candles, price);
   if (signal && signal.confidence >= CONFIG.minConfidence) {
