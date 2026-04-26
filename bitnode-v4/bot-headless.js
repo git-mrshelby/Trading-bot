@@ -31,7 +31,7 @@ const CONFIG = {
   // Scanner Settings
   scanIntervalMs: 1000, // 1 second HFT speed
   maxPairs: 30,
-  minConfidence: 85,
+  minConfidence: 65,
   
   // URLs
   marketBaseUrl: process.env.MARKET_BASE_URL || 'https://fapi.binance.com',
@@ -378,6 +378,12 @@ async function mainLoop() {
   const price = await getRealPrice(symbol);
   
   const signal = buildSMC_Signal(candles, price);
+  
+  // Heartbeat log every 5 seconds to show it's not stuck
+  if (Date.now() % 5000 < 1000) {
+     console.log(`[SCANNING] Best Signal: ${symbol} | Confidence: ${signal ? signal.confidence : 0}%`);
+  }
+
   if (signal && signal.confidence >= CONFIG.minConfidence) {
     activeTrade = await executeTrade(symbol, signal.direction, price);
   }
